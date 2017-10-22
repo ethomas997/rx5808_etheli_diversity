@@ -295,14 +295,14 @@ void screens::updateSeekMode(uint8_t state, uint8_t channelIndex, uint8_t channe
 #ifdef USE_LBAND
     if (channelIndex > 39)
     {
-      display.print(PSTR2("D/5.3    "));
+      display.print(PSTR2("L/Lowrace"));
     }
     else if (channelIndex > 31)
 #else
     if (channelIndex > 31)
 #endif
     {
-      display.print(PSTR2("C/Race   "));
+      display.print(PSTR2("R/Racebnd"));
     }
     else if (channelIndex > 23)
     {
@@ -416,7 +416,7 @@ void screens::bandScanMode(uint8_t state) {
   display.display();
 }
  
-void screens::updateBandScanMode(bool in_setup, uint8_t channel, uint8_t rssi, uint8_t channelName, uint16_t channelFrequency, uint16_t rssi_setup_min_a, uint16_t rssi_setup_max_a) {
+void screens::updateBandScanMode(bool in_setup, uint8_t channel, uint8_t rssi, uint16_t channelName, uint16_t channelFrequency, uint16_t rssi_setup_min_a, uint16_t rssi_setup_max_a) {
 #define SCANNER_LIST_X_POS 60
   static uint8_t writePos = SCANNER_LIST_X_POS;
   uint8_t rssi_scaled = map(rssi, 1, 100, 1, 30);
@@ -441,7 +441,8 @@ void screens::updateBandScanMode(bool in_setup, uint8_t channel, uint8_t rssi, u
         best_rssi = rssi;
         display.setTextColor(WHITE, BLACK);
         display.setCursor(36, 12);
-        display.print(channelName, HEX);
+        display.print((char)(channelName >> 8));      //band char
+        display.print((char)(channelName & 0xFF));    //channel char
         display.setCursor(52, 12);
         display.print(channelFrequency);
       }
@@ -470,10 +471,10 @@ void screens::updateBandScanMode(bool in_setup, uint8_t channel, uint8_t rssi, u
   last_channel = channel;
 }
  
-void screens::screenSaver(uint8_t channelName, uint16_t channelFrequency, const char *call_sign) {
+void screens::screenSaver(uint16_t channelName, uint16_t channelFrequency, const char *call_sign) {
   screenSaver(-1, channelName, channelFrequency, call_sign);
 }
-void screens::screenSaver(uint8_t diversity_mode, uint8_t channelName, uint16_t channelFrequency, const char *call_sign) {
+void screens::screenSaver(uint8_t diversity_mode, uint16_t channelName, uint16_t channelFrequency, const char *call_sign) {
   reset();
 //  display.setTextSize(6);
 //  display.setTextColor(WHITE);
@@ -488,12 +489,6 @@ void screens::screenSaver(uint8_t diversity_mode, uint8_t channelName, uint16_t 
 //  display.print(channelFrequency);
 //  display.setTextSize(1);
  
- 
- 
- 
- 
- 
- 
   display.setTextSize(4);
   display.setTextColor(WHITE);
   display.setCursor(2, 0);
@@ -504,7 +499,8 @@ void screens::screenSaver(uint8_t diversity_mode, uint8_t channelName, uint16_t 
   display.setTextSize(2);
   display.setCursor(98, 2);
   display.setTextColor( WHITE);
-  display.print(channelName, HEX);
+  display.print((char)(channelName >> 8));       //band char
+  display.print((char)(channelName & 0xFF));     //channel char
  
  
   display.setTextSize(1);

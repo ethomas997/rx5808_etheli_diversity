@@ -65,7 +65,7 @@ screens drawScreen;
 
 void setup();
 void loop();
-uint8_t channel_from_index(uint8_t channelIndex);
+uint16_t channelIndexToName(uint8_t idx);
 void beep(uint16_t time);
 void FillTemp_Tune_fav(int FavChannelx);
 void SendToOSD();
@@ -100,10 +100,10 @@ const uint8_t channelNames[] PROGMEM = {
   0xE1, 0xE2, 0xE3, 0xE4, 0xE5, 0xE6, 0xE7, 0xE8, // Band E
   0xF1, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6, 0xF7, 0xF8, // Band F / Airwave
 #ifdef USE_LBAND
-  0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8, // Band C / Immersion Raceband
-  0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8  // BAND D / 5.3
+  0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, // Band R / Immersion Raceband
+  0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18  // BAND L / 5.3
 #else
-  0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8  // Band C / Immersion Raceband
+  0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78  // Band R / Immersion Raceband
 #endif
 };
 
@@ -656,7 +656,7 @@ void loop()
           EEPROM.write(EEPROM_ADR_TUNE, channelIndex);
 
 
-          //drawScreen.screenSaver(diversity_mode, pgm_read_byte_near(channelNames + channelIndex), pgm_read_word_near(channelFreqTable + channelIndex), call_sign);
+          //drawScreen.screenSaver(diversity_mode, channelIndexToName(channelIndex), pgm_read_word_near(channelFreqTable + channelIndex), call_sign);
         }
         ///END LONG PRESS IN FAVORITES WILL DELETE THE CURRENT FAVORITE CHANNEL
         for (uint8_t loop = 0; loop < 5; loop++)
@@ -702,9 +702,9 @@ void loop()
 
 
 #ifdef USE_DIVERSITY
-    drawScreen.screenSaver(diversity_mode, pgm_read_byte_near(channelNames + channelIndex), pgm_read_word_near(channelFreqTable + channelIndex), call_sign);
+    drawScreen.screenSaver(diversity_mode, channelIndexToName(channelIndex), pgm_read_word_near(channelFreqTable + channelIndex), call_sign);
 #else
-    drawScreen.screenSaver(pgm_read_byte_near(channelNames + channelIndex), pgm_read_word_near(channelFreqTable + channelIndex), call_sign);
+    drawScreen.screenSaver(channelIndexToName(channelIndex), pgm_read_word_near(channelFreqTable + channelIndex), call_sign);
 #endif
     time_screen_saver = millis();
     do {
@@ -1067,7 +1067,7 @@ void loop()
       }
     }
 
-    uint8_t bestChannelName = pgm_read_byte_near(channelNames + channelIndex);
+    uint16_t bestChannelName = channelIndexToName(channelIndex);
     uint16_t bestChannelFrequency = pgm_read_word_near(channelFreqTable + channelIndex);
 
     drawScreen.updateBandScanMode((system_state == STATE_RSSI_SETUP), channel_value, rssi_value, bestChannelName, bestChannelFrequency, rssi_setup_min_a, rssi_setup_max_a);
@@ -1265,6 +1265,23 @@ void loop()
 /*   SUB ROUTINES  */
 /*******************/
 
+//Converts the given channel-index value to a 2-character band/channel
+// text value encoded in a 16-bit integer.
+// Returns a 16-bit integer with the high byte holding the 'band'
+//  character and the low byte holding the 'channel' character.
+uint16_t channelIndexToName(uint8_t idx)
+{
+  uint8_t tblVal = pgm_read_byte_near(channelNames + channelIndex);
+  uint8_t chVal = (tblVal & (uint8_t)0x0F) + '0';     //channel
+  tblVal >>= 4;                        //band
+  if (tblVal >= (uint8_t)0x0A)
+    tblVal += ('A'-(uint8_t)0x0A);     //band 'A' thru 'F'
+  else
+    tblVal += 'K';                     //band 'L' or 'R'
+
+  return (((uint16_t)tblVal) << 8) + chVal;
+}
+
 void beep(uint16_t time)
 {
   digitalWrite(led, HIGH);
@@ -1276,7 +1293,8 @@ void beep(uint16_t time)
   digitalWrite(buzzer, HIGH);
 }
 
-void FillTemp_Tune_fav(int FavChannelx) {
+void FillTemp_Tune_fav(int FavChannelx)
+{
   for (int i = 0; i < 10; i++)
   {
     if ( temp_EEPROM_ADR_TUNE_FAV[i] == 255 && FavChannelx != 255) //not used  gc9n
