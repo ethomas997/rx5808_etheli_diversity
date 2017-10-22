@@ -360,7 +360,7 @@ void loop()
           }
           else {
             menu_id++;
-            system_state = STATE_SETUP_MENU;
+            system_state = STATE_FAVORITE;
           }
           break;
 #else
@@ -1278,7 +1278,6 @@ uint16_t channelIndexToName(uint8_t idx)
     tblVal += ('A'-(uint8_t)0x0A);     //band 'A' thru 'F'
   else
     tblVal += 'K';                     //band 'L' or 'R'
-
   return (((uint16_t)tblVal) << 8) + chVal;
 }
 
