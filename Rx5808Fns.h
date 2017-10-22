@@ -6,7 +6,7 @@
 #ifndef RX5808FNS_H_
 #define RX5808FNS_H_
 
-uint8_t channel_from_index(uint8_t channelIndex);
+uint8_t getChannelSortTableIndex(uint8_t channelIndex);
 uint8_t getChannelSortTableEntry(int idx);
 void wait_rssi_ready();
 void set_time_of_tune();

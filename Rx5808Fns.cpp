@@ -64,8 +64,9 @@ extern char diversity_check_count; // used to decide when to change antennas.
 void SendToOSD();
 extern int OSDParams[4];
 
-
-uint8_t channel_from_index(uint8_t channelIndex)
+//Returns the index into the channel-sorted-indices table for the entry
+// corresponding to the given value.
+uint8_t getChannelSortTableIndex(uint8_t channelIndex)
 {
   uint8_t loop = 0;
   uint8_t channel = 0;

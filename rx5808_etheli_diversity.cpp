@@ -66,6 +66,7 @@ screens drawScreen;
 void setup();
 void loop();
 uint16_t channelIndexToName(uint8_t idx);
+uint16_t getCurrentChannelInMhz();
 void beep(uint16_t time);
 void FillTemp_Tune_fav(int FavChannelx);
 void SendToOSD();
@@ -108,10 +109,6 @@ const uint8_t channelNames[] PROGMEM = {
 };
 
 
-static char channel_value = 0;
-static uint8_t rssi_value = 0;
-static uint8_t rssi_seek_threshold = RSSI_SEEK_TRESHOLD;
-
 #ifdef USE_DIVERSITY
 uint8_t diversity_mode = useReceiverAuto;
 char diversity_check_count = 0; // used to decide when to change antennas.
@@ -134,9 +131,12 @@ uint16_t rssi_setup_min_b = RSSI_MIN_VAL;
 uint16_t rssi_setup_max_b = RSSI_MAX_VAL;
 #endif
 
+static uint8_t rssi_seek_threshold = RSSI_SEEK_TRESHOLD;
 static uint8_t rssi_setup_run = 0;
 static boolean force_menu_redraw = 0;
-static uint8_t channelIndex = 0;
+
+static uint8_t current_channel_index = 0;
+static char channel_sort_idx = 0;
 static uint8_t switch_count = 0;
 static uint8_t last_channel_index = 0;
 static uint8_t force_seek = 0;
@@ -228,11 +228,11 @@ void setup()
 
   // read last setting from eeprom
   system_state = EEPROM.read(EEPROM_ADR_STATE);
-  channelIndex = EEPROM.read(EEPROM_ADR_TUNE);
+  current_channel_index = EEPROM.read(EEPROM_ADR_TUNE);
   // set the channel as soon as we can
   // faster boot up times :)
-  setChannelModule(channelIndex);
-  last_channel_index = channelIndex;
+  setChannelModule(current_channel_index);
+  last_channel_index = current_channel_index;
 
   settings_beeps = EEPROM.read(EEPROM_ADR_BEEP);
   settings_OSD = EEPROM.read(EEPROM_ADR_OSD);
@@ -522,8 +522,8 @@ void loop()
         }
 
         // trigger new scan from begin
-        channel_value = CHANNEL_MIN;
-        channelIndex = getChannelSortTableEntry(channel_value);
+        channel_sort_idx = CHANNEL_MIN;
+        current_channel_index = getChannelSortTableEntry(channel_sort_idx);
         rssi_best = 0;
         scan_start = 1;
         drawScreen.bandScanMode(system_state);
@@ -545,7 +545,7 @@ void loop()
 
         // return user to their saved channel after bandscan
         if (state_last_used == STATE_SCAN || state_last_used == STATE_FAVORITE || last_state == STATE_RSSI_SETUP ) {
-          channelIndex = EEPROM.read(EEPROM_ADR_TUNE);
+          current_channel_index = EEPROM.read(EEPROM_ADR_TUNE);
         }
         state_last_used = system_state;
         break;
@@ -559,7 +559,7 @@ void loop()
         break;
       case STATE_SAVE:
 
-        EEPROM.write(EEPROM_ADR_TUNE, channelIndex);
+        EEPROM.write(EEPROM_ADR_TUNE, current_channel_index);
         EEPROM.write(EEPROM_ADR_STATE, state_last_used);
         EEPROM.write(EEPROM_ADR_BEEP, settings_beeps);
         EEPROM.write(EEPROM_ADR_ORDERBY, settings_orderby_channel);
@@ -593,7 +593,7 @@ void loop()
           {
             if ( EEPROM.read(EEPROM_ADR_TUNE_FAV[i]) == 255) //not used  gc9n
             {
-              EEPROM.write(EEPROM_ADR_TUNE_FAV[i], channelIndex);
+              EEPROM.write(EEPROM_ADR_TUNE_FAV[i], current_channel_index);
               EEPROM.write(EEPROM_ADR_TUNE_FAV_LAST, i);
               i = 12; //exit loop
             }
@@ -601,13 +601,13 @@ void loop()
           OSDParams[0] = -2; //this is save
           OSDParams[1] = 0; //By default goes over manual
           SendToOSD(); //UPDATE OSD
-          drawScreen.save(state_last_used, channelIndex, pgm_read_word_near(channelFreqTable + channelIndex), call_sign, EEPROM.read(EEPROM_ADR_TUNE_FAV_LAST) + 1);
+          drawScreen.save(state_last_used, current_channel_index, getCurrentChannelInMhz(), call_sign, EEPROM.read(EEPROM_ADR_TUNE_FAV_LAST) + 1);
         }
         if (last_state == STATE_SETUP_MENU)
         { OSDParams[0] = -2; //this is save
           OSDParams[1] = 0; //By default goes over manual
           SendToOSD(); //UPDATE OSD
-          drawScreen.save(state_last_used, channelIndex, pgm_read_word_near(channelFreqTable + channelIndex), call_sign, -99);
+          drawScreen.save(state_last_used, current_channel_index, getCurrentChannelInMhz(), call_sign, -99);
         }
 
         ///LONG PRESS IN FAVORITES WILL DELETE THE CURRENT FAVORITE CHANNEL
@@ -617,7 +617,7 @@ void loop()
           OSDParams[1] = 0; //By default goes over manual
           SendToOSD(); //UPDATE OSD
           EEPROM.write(EEPROM_ADR_TUNE_FAV[lfavs], 255);
-          drawScreen.FavDelete(   pgm_read_word_near(channelFreqTable + channelIndex), lfavs + 1);
+          drawScreen.FavDelete(   getCurrentChannelInMhz(), lfavs + 1);
           
           for (int i = 0; i < 10; i++) {
             temp_EEPROM_ADR_TUNE_FAV[i] = 255;    //empty temp
@@ -648,15 +648,15 @@ void loop()
           RefreshFav = false;
            delay(1000);
           EEPROM.write(EEPROM_ADR_TUNE_FAV_LAST, 0);
-          channelIndex = EEPROM.read(EEPROM_ADR_TUNE_FAV[0]) ;
+          current_channel_index = EEPROM.read(EEPROM_ADR_TUNE_FAV[0]) ;
           lfavs = 0;
-          channelIndex = EEPROM.read(EEPROM_ADR_TUNE_FAV[0]) ;
+          current_channel_index = EEPROM.read(EEPROM_ADR_TUNE_FAV[0]) ;
           drawScreen.FavSel(1);
-          channel_value = channel_from_index(channelIndex);
-          EEPROM.write(EEPROM_ADR_TUNE, channelIndex);
+          channel_sort_idx = getChannelSortTableIndex(current_channel_index);
+          EEPROM.write(EEPROM_ADR_TUNE, current_channel_index);
 
 
-          //drawScreen.screenSaver(diversity_mode, channelIndexToName(channelIndex), pgm_read_word_near(channelFreqTable + channelIndex), call_sign);
+          //drawScreen.screenSaver(diversity_mode, channelIndexToName(channelIndex), getCurrentChannelInMhz(), call_sign);
         }
         ///END LONG PRESS IN FAVORITES WILL DELETE THE CURRENT FAVORITE CHANNEL
         for (uint8_t loop = 0; loop < 5; loop++)
@@ -685,7 +685,7 @@ void loop()
 
         // return user to their saved channel after bandscan
         if (state_last_used == STATE_SCAN || state_last_used == STATE_FAVORITE  || last_state == STATE_RSSI_SETUP) {
-          channelIndex = EEPROM.read(EEPROM_ADR_TUNE);
+          current_channel_index = EEPROM.read(EEPROM_ADR_TUNE);
         }
         state_last_used = system_state;
         break;
@@ -694,23 +694,28 @@ void loop()
 
     last_state = system_state;
   }
+
+  uint8_t rssi_value;
+
   /*************************************/
   /*   Processing depending of state   */
   /*************************************/
 #ifndef TVOUT_SCREENS
-  if (system_state == STATE_SCREEN_SAVER || system_state == STATE_SCREEN_SAVER_LITE) {
-
+  if (system_state == STATE_SCREEN_SAVER || system_state == STATE_SCREEN_SAVER_LITE)
+  {
 
 #ifdef USE_DIVERSITY
-    drawScreen.screenSaver(diversity_mode, channelIndexToName(channelIndex), pgm_read_word_near(channelFreqTable + channelIndex), call_sign);
+    drawScreen.screenSaver(diversity_mode, channelIndexToName(current_channel_index), getCurrentChannelInMhz(), call_sign);
 #else
-    drawScreen.screenSaver(channelIndexToName(channelIndex), pgm_read_word_near(channelFreqTable + channelIndex), call_sign);
+    drawScreen.screenSaver(channelIndexToName(current_channel_index), getCurrentChannelInMhz(), call_sign);
 #endif
     time_screen_saver = millis();
-    do {
+    do
+    {
       rssi_value = readRSSI();
 
-      if ( ((time_screen_saver != 0 && time_screen_saver + (SCREENSAVER_TIMEOUT * 1000) < millis())) ) {
+      if ( ((time_screen_saver != 0 && time_screen_saver + (SCREENSAVER_TIMEOUT * 1000) < millis())) )
+      {
         OSDParams[0] = -99; // CLEAR OSD
         SendToOSD(); //UPDATE OSD
         time_screen_saver = 0;
@@ -725,7 +730,6 @@ void loop()
 #endif
 
     }
-
     while ((digitalRead(buttonMode) == HIGH) && (digitalRead(buttonUp) == HIGH) && (digitalRead(buttonDown) == HIGH) &&  FSButtonDirection() == 0); // wait for next button press
     system_state = state_last_used;
     return;
@@ -805,7 +809,7 @@ void loop()
         }
       }
       RefreshFav = true;
-      //channel=channel_from_index(channelIndex); // get 0...48 index depending of current channel
+      //channel=channel_from_index(current_channel_index); // get 0...47 index depending of current channel
     }  // handling of keys
 
     if ( digitalRead(buttonUp) == LOW || FS_BUTTON_DIR == 1)      // channel UP
@@ -815,22 +819,21 @@ void loop()
       if (lfavs > FirstFav) {
         lfavs = 0;
       }
-      channelIndex = EEPROM.read(EEPROM_ADR_TUNE_FAV[lfavs]) ;
-      if (channelIndex != 255)
+      current_channel_index = EEPROM.read(EEPROM_ADR_TUNE_FAV[lfavs]) ;
+      if (current_channel_index != 255)
       {
         drawScreen.FavSel(lfavs + 1);
-        channel_value = channel_from_index(channelIndex); // get 0...48 index depending of current channel
+        channel_sort_idx = getChannelSortTableIndex(current_channel_index); // get 0...47 index depending of current channel
         time_screen_saver = millis();
         beep(50); // beep & debounce
         delay(KEY_DEBOUNCE); // debounce
-        channel_value > CHANNEL_MAX ? channel_value = CHANNEL_MIN : false;
-        if (channelIndex > CHANNEL_MAX_INDEX)
-        {
-          channelIndex = CHANNEL_MIN_INDEX;
-        }
+        if (channel_sort_idx > CHANNEL_MAX)
+          channel_sort_idx = CHANNEL_MIN;
+        if (current_channel_index > CHANNEL_MAX_INDEX)
+          current_channel_index = CHANNEL_MIN_INDEX;
         // drawScreen.seekMode(state);
-        EEPROM.write(EEPROM_ADR_TUNE, channelIndex);
-        //Serial.println(channelIndex);
+        EEPROM.write(EEPROM_ADR_TUNE, current_channel_index);
+        //Serial.println(current_channel_index);
       }
       else
       {
@@ -849,23 +852,24 @@ void loop()
         lfavs = FirstFav;
       }
 
-      channelIndex = EEPROM.read(EEPROM_ADR_TUNE_FAV[lfavs]) ;
-      if (channelIndex != 255)
+      current_channel_index = EEPROM.read(EEPROM_ADR_TUNE_FAV[lfavs]) ;
+      if (current_channel_index != 255)
       {
         drawScreen.FavSel(lfavs + 1);
-        channel_value = channel_from_index(channelIndex); // get 0...48 index depending of current channel
+        channel_sort_idx = getChannelSortTableIndex(current_channel_index); // get 0...47 index depending of current channel
         time_screen_saver = millis();
         beep(50); // beep & debounce
         delay(KEY_DEBOUNCE); // debounce
 
-        channel_value < CHANNEL_MIN ? channel_value = CHANNEL_MAX : false;
-        if (channelIndex > CHANNEL_MAX_INDEX) // negative overflow
+        if (channel_sort_idx < CHANNEL_MIN)
+          channel_sort_idx = CHANNEL_MAX;
+        if (current_channel_index > CHANNEL_MAX_INDEX) // negative overflow
         {
-          channelIndex = CHANNEL_MAX_INDEX;
+          current_channel_index = CHANNEL_MAX_INDEX;
         }
 
         //drawScreen.seekMode(state);
-        EEPROM.write(EEPROM_ADR_TUNE, channelIndex);
+        EEPROM.write(EEPROM_ADR_TUNE, current_channel_index);
       }
       else
       {
@@ -885,7 +889,7 @@ void loop()
     }// IF YOU HAVE FAVS
 
     OSDParams[0] = 4; //this is FAV menu
-    OSDParams[1] = pgm_read_word_near(channelFreqTable + channelIndex);
+    OSDParams[1] = getCurrentChannelInMhz();
     OSDParams[2] = lfavs + 1;
     SendToOSD(); //UPDATE OSD
   }
@@ -903,7 +907,7 @@ void loop()
     FS_BUTTON_DIR = FSButtonDirection();
     
     
-    channel_value = channel_from_index(channelIndex); // get 0...48 index depending of current channel
+    channel_sort_idx = getChannelSortTableIndex(current_channel_index); // get 0...47 index depending of current channel
     if (system_state == STATE_MANUAL) // MANUAL MODE
     {
 
@@ -916,13 +920,12 @@ void loop()
         beep(50); // beep & debounce
         delay(KEY_DEBOUNCE); // debounce
         FS_BUTTON_DIR=0;
-        channelIndex++;
-        channel_value++;
-        channel_value > CHANNEL_MAX ? channel_value = CHANNEL_MIN : false;
-        if (channelIndex > CHANNEL_MAX_INDEX)
-        {
-          channelIndex = CHANNEL_MIN_INDEX;
-        }
+        current_channel_index++;
+        channel_sort_idx++;
+        if (channel_sort_idx > CHANNEL_MAX)
+          channel_sort_idx = CHANNEL_MIN;
+        if (current_channel_index > CHANNEL_MAX_INDEX)
+          current_channel_index = CHANNEL_MIN_INDEX;
       }
       if ( digitalRead(buttonDown) == LOW || FS_BUTTON_DIR == 2 ) // channel DOWN
       {
@@ -930,23 +933,25 @@ void loop()
         beep(50); // beep & debounce
         delay(KEY_DEBOUNCE); // debounce
         FS_BUTTON_DIR=0;
-        channelIndex--;
-        channel_value--;
-        channel_value < CHANNEL_MIN ? channel_value = CHANNEL_MAX : false;
-        if (channelIndex > CHANNEL_MAX_INDEX) // negative overflow
+        current_channel_index--;
+        channel_sort_idx--;
+        if (channel_sort_idx < CHANNEL_MIN)
+          channel_sort_idx = CHANNEL_MAX;
+        if (current_channel_index > CHANNEL_MAX_INDEX) // negative overflow
         {
-          channelIndex = CHANNEL_MAX_INDEX;
+          current_channel_index = CHANNEL_MAX_INDEX;
         }
       }
 
-     if (OSDParams[1]!=pgm_read_word_near(channelFreqTable + channelIndex))
-        {
-        OSDParams[1]=pgm_read_word_near(channelFreqTable + channelIndex);
+      if (OSDParams[1]!=getCurrentChannelInMhz())
+      {
+        OSDParams[1]=getCurrentChannelInMhz();
         SendToOSD(); //UPDATE OSD
+      }
 
-        }
-        if (!settings_orderby_channel) { // order by frequency
-        channelIndex = getChannelSortTableEntry(channel_value);
+      if (!settings_orderby_channel)
+      { // order by frequency
+        current_channel_index = getChannelSortTableEntry(channel_sort_idx);
       }
 
     }
@@ -974,23 +979,23 @@ void loop()
         { // seeking itself
           force_seek = 0;
           // next channel
-          channel_value += seek_direction;
-          if (channel_value > CHANNEL_MAX)
+          channel_sort_idx += seek_direction;
+          if (channel_sort_idx > CHANNEL_MAX)
           {
             // calculate next pass new seek threshold
             rssi_seek_threshold = (int)((float)rssi_best * (float)(RSSI_SEEK_TRESHOLD / 100.0));
-            channel_value = CHANNEL_MIN;
+            channel_sort_idx = CHANNEL_MIN;
             rssi_best = 0;
           }
-          else if (channel_value < CHANNEL_MIN)
+          else if (channel_sort_idx < CHANNEL_MIN)
           {
             // calculate next pass new seek threshold
             rssi_seek_threshold = (int)((float)rssi_best * (float)(RSSI_SEEK_TRESHOLD / 100.0));
-            channel_value = CHANNEL_MAX;
+            channel_sort_idx = CHANNEL_MAX;
             rssi_best = 0;
           }
           rssi_seek_threshold = rssi_seek_threshold < 5 ? 5 : rssi_seek_threshold; // make sure we are not stopping on everyting
-          channelIndex = getChannelSortTableEntry(channel_value);
+          current_channel_index = getChannelSortTableEntry(channel_sort_idx);
         }
       }
       else
@@ -1015,9 +1020,8 @@ void loop()
         time_screen_saver = 0;
       }
 
-
-   SendToOSD(); //UPDATE OSD
-    } 
+      SendToOSD(); //UPDATE OSD
+    }
     // change to screensaver after lock and 5 seconds has passed.
     if (((time_screen_saver + 5000 < millis()) && (time_screen_saver != 0) && (rssi_value > 50)) ||
         ((time_screen_saver != 0 && time_screen_saver + (SCREENSAVER_TIMEOUT * 1000) < millis()))) {
@@ -1025,16 +1029,14 @@ void loop()
       OSDParams[0] = -99; // CLEAR OSD
       SendToOSD(); //UPDATE OSD
     }
- 
-    
   
-   //teza
-     if (last_channel_index != channelIndex)        // tune channel on demand
-  { 
-    drawScreen.updateSeekMode(system_state, channelIndex, channel_value, rssi_value, pgm_read_word_near(channelFreqTable + channelIndex), rssi_seek_threshold, seek_found);
-    OSDParams[1] = pgm_read_word_near(channelFreqTable + channelIndex);
-    SendToOSD(); //UPDATE OSD
-  }
+    //teza
+    if (last_channel_index != current_channel_index)        // tune channel on demand
+    {
+      drawScreen.updateSeekMode(system_state, current_channel_index, channel_sort_idx, rssi_value, getCurrentChannelInMhz(), rssi_seek_threshold, seek_found);
+      OSDParams[1] = getCurrentChannelInMhz();
+      SendToOSD(); //UPDATE OSD
+    }
   }
   /****************************/
   /*   Processing SCAN MODE   */
@@ -1048,8 +1050,8 @@ void loop()
     if (scan_start)
     {
       scan_start = 0;
-      setChannelModule(channelIndex);
-      last_channel_index = channelIndex;
+      setChannelModule(current_channel_index);
+      last_channel_index = current_channel_index;
     }
 
     // print bar for spectrum
@@ -1067,19 +1069,19 @@ void loop()
       }
     }
 
-    uint16_t bestChannelName = channelIndexToName(channelIndex);
-    uint16_t bestChannelFrequency = pgm_read_word_near(channelFreqTable + channelIndex);
+    uint16_t bestChannelName = channelIndexToName(current_channel_index);
+    uint16_t bestChannelFrequency = getCurrentChannelInMhz();
 
-    drawScreen.updateBandScanMode((system_state == STATE_RSSI_SETUP), channel_value, rssi_value, bestChannelName, bestChannelFrequency, rssi_setup_min_a, rssi_setup_max_a);
+    drawScreen.updateBandScanMode((system_state == STATE_RSSI_SETUP), channel_sort_idx, rssi_value, bestChannelName, bestChannelFrequency, rssi_setup_min_a, rssi_setup_max_a);
 
     // next channel
-    if (channel_value < CHANNEL_MAX)
+    if (channel_sort_idx < CHANNEL_MAX)
     {
-      channel_value++;
+      channel_sort_idx++;
     }
     else
     {
-      channel_value = CHANNEL_MIN;
+      channel_sort_idx = CHANNEL_MIN;
       if (system_state == STATE_RSSI_SETUP)
       {
         if (!rssi_setup_run--)
@@ -1125,14 +1127,14 @@ void loop()
       beep(50); // beep & debounce
       delay(KEY_DEBOUNCE); // debounce
       last_state = 255; // force redraw by fake state change ;-)
-      channel_value = CHANNEL_MIN;
+      channel_sort_idx = CHANNEL_MIN;
       scan_start = 1;
       rssi_best = 0;
       FS_BUTTON_DIR = 0;
 
     }
     // update index after channel change
-    channelIndex = getChannelSortTableEntry(channel_value);
+    current_channel_index = getChannelSortTableEntry(channel_sort_idx);
   }
 
   /****************************/
@@ -1240,10 +1242,10 @@ void loop()
   /*****************************/
   /*   General house keeping   */
   /*****************************/
-  if (last_channel_index != channelIndex)        // tune channel on demand
+  if (last_channel_index != current_channel_index)        // tune channel on demand
   {
-    setChannelModule(channelIndex);
-    last_channel_index = channelIndex;
+    setChannelModule(current_channel_index);
+    last_channel_index = current_channel_index;
     // keep time of tune to make sure that RSSI is stable when required
     set_time_of_tune();
     // give 3 beeps when tuned to give feedback of correct start
@@ -1271,7 +1273,7 @@ void loop()
 //  character and the low byte holding the 'channel' character.
 uint16_t channelIndexToName(uint8_t idx)
 {
-  uint8_t tblVal = pgm_read_byte_near(channelNames + channelIndex);
+  uint8_t tblVal = pgm_read_byte_near(channelNames + idx);
   uint8_t chVal = (tblVal & (uint8_t)0x0F) + '0';     //channel
   tblVal >>= 4;                        //band
   if (tblVal >= (uint8_t)0x0A)
@@ -1279,6 +1281,20 @@ uint16_t channelIndexToName(uint8_t idx)
   else
     tblVal += 'K';                     //band 'L' or 'R'
   return (((uint16_t)tblVal) << 8) + chVal;
+}
+
+//Returns the frequency in MHz corresponding to the current channel.
+uint16_t getCurrentChannelInMhz()
+{
+  static uint8_t lastChanIdxVal = 255;
+  static uint16_t lastChanInMHz = 0;
+
+  if (current_channel_index != lastChanIdxVal)
+  {
+    lastChanIdxVal = current_channel_index;
+    lastChanInMHz = pgm_read_word_near(channelFreqTable + lastChanIdxVal);
+  }
+  return lastChanInMHz;
 }
 
 void beep(uint16_t time)
