@@ -122,7 +122,7 @@ SOFTWARE.
 #define STATE_SCAN 2
 #define STATE_MANUAL 3
 #ifdef USE_DIVERSITY
-    #define STATE_DIVERSITY 4
+#define STATE_DIVERSITY 4
 #endif
 #define STATE_SETUP_MENU 5
 #define STATE_SAVE 6

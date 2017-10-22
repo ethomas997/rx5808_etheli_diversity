@@ -60,11 +60,15 @@ Adafruit_SSD1306 display(OLED_RESET);
 #error("Screen size incorrect, please fix Adafruit_SSD1306.h!");
 #endif
 #endif
- 
+
+
+extern uint8_t system_state;
+
  
 screens::screens() {
   last_channel = -1;
   last_rssi = 0;
+  best_rssi = 0;
 }
  
 char screens::begin(const char *call_sign) {
@@ -546,9 +550,8 @@ void screens::updateScreenSaver(uint8_t rssi) {
   updateScreenSaver(-1, rssi, -1, -1 );
 }
 void screens::updateScreenSaver(char active_receiver, uint8_t rssi, uint8_t rssiA, uint8_t rssiB ) {
- extern uint8_t state;
   
-  if (state == STATE_SCREEN_SAVER_LITE) {
+  if (system_state == STATE_SCREEN_SAVER_LITE) {
            reset(); // start from fresh screen.
           uint8_t rssi_scaled = map(rssiA, 1, 100, 3, 119);
           display.fillRect(0, 30, rssi_scaled, 30, WHITE);
