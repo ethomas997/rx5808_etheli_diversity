@@ -6,6 +6,7 @@
 #include "settings.h"
 #include "Rx5808Fns.h"
 
+static void setChannelByRegVal(uint16_t regVal);
 static void SERIAL_SENDBIT1();
 static void SERIAL_SENDBIT0();
 static void SERIAL_ENABLE_LOW();
@@ -13,7 +14,7 @@ static void SERIAL_ENABLE_HIGH();
 
 
 // Channels to sent to the SPI registers
-const uint16_t channelTable[] PROGMEM = {
+const uint16_t channelRegTable[] PROGMEM = {
   // Channel 1 - 8
   0x2A05,    0x299B,    0x2991,    0x2987,    0x291D,    0x2913,    0x2909,    0x289F,    // Band A
   0x2903,    0x290C,    0x2916,    0x291F,    0x2989,    0x2992,    0x299C,    0x2A05,    // Band B
@@ -24,6 +25,21 @@ const uint16_t channelTable[] PROGMEM = {
   0x2609,    0x261C,    0x268E,    0x2701,    0x2713,    0x2786,    0x2798,    0x280B     // Band L / Lowrace
 #else
   0x281d ,   0x2890 ,   0x2902 ,   0x2915 ,   0x2987 ,   0x299a ,  0x2a0c ,    0x2a1f,    // Band R / Immersion Raceband
+#endif
+};
+
+// Channels with their Mhz Values
+const uint16_t channelFreqTable[] PROGMEM = {
+  // Channel 1 - 8
+  5865, 5845, 5825, 5805, 5785, 5765, 5745, 5725, // Band A
+  5733, 5752, 5771, 5790, 5809, 5828, 5847, 5866, // Band B
+  5705, 5685, 5665, 5645, 5885, 5905, 5925, 5945, // Band E
+  5740, 5760, 5780, 5800, 5820, 5840, 5860, 5880, // Band F / Airwave
+#ifdef USE_LBAND
+  5658, 5695, 5732, 5769, 5806, 5843, 5880, 5917, // Band C / Immersion Raceband
+  5362, 5399, 5436, 5473, 5510, 5547, 5584, 5621  // Band D / 5.3
+#else
+  5658, 5695, 5732, 5769, 5806, 5843, 5880, 5917  // Band C / Immersion Raceband
 #endif
 };
 
@@ -85,6 +101,58 @@ uint8_t getChannelSortTableIndex(uint8_t channelIndex)
 uint8_t getChannelSortTableEntry(int idx)
 {
   return pgm_read_word_near(channelSortTable + idx);
+}
+
+//Returns the value from the channel-frequency table for the given index.
+uint16_t getChannelFreqTableEntry(int idx)
+{
+  return pgm_read_word_near(channelFreqTable + idx);
+}
+
+//Returns the 'channelFreqTable[]' index corresponding to the given
+// frequency in MHz, or -1 if no match.
+int getIdxForFreqInMhz(uint16_t freqVal)
+{
+  for(int idx=CHANNEL_MIN_INDEX; idx<=CHANNEL_MAX_INDEX; ++idx)
+  {
+    if(getChannelFreqTableEntry(idx) == freqVal)
+      return idx;
+  }
+  return -1;
+}
+
+//Converts frequency value in MHz to its 'channelFreqTable[]' index or
+// next/nearest index.
+// freqVal:  Frequency value in MHz.
+// upFlag:  true to increment when finding next/nearest code; false to
+//          decrement.
+// Returns the 'channelFreqTable[]' index.
+uint8_t freqInMhzToNearestFreqIdx(uint16_t freqVal, boolean upFlag)
+{
+  int freqIdx, fChkVal = freqVal;
+  uint16_t codeVal;
+  do
+  {
+    freqIdx = getIdxForFreqInMhz(fChkVal);
+    if(freqIdx >= 0)
+    {  //table-index value found for frequency
+      return (uint8_t)freqIdx;
+    }
+    if(upFlag)
+    {  //increment
+      if(++fChkVal > MAX_CHANNEL_MHZ)       //increment frequency by 1 MHz
+        fChkVal = MIN_CHANNEL_MHZ;          //if beyond max, wrap to min
+    }
+    else
+    {  //decrement
+      if(--fChkVal < MIN_CHANNEL_MHZ)       //decrement frequency by 1 MHz
+        fChkVal = MAX_CHANNEL_MHZ;          //if beyond min, wrap to max
+    }
+  }
+  while(fChkVal != freqVal);   //loop unless wrapped around to original freq
+
+  // if unable to match then use min or max index
+  return (freqVal < 5800) ? CHANNEL_MIN_INDEX : CHANNEL_MAX_INDEX;
 }
 
 void wait_rssi_ready()
@@ -254,7 +322,8 @@ uint16_t readRSSI(char receiver)
   return constrain(rssi, 1, 100); // clip values to only be within this range.
 }
 
-void setReceiver(uint8_t receiver) {
+void setReceiver(uint8_t receiver)
+{
 #ifdef USE_DIVERSITY
   if (receiver == useReceiverA)
   {
@@ -281,14 +350,41 @@ void setReceiver(uint8_t receiver) {
   active_receiver = receiver;
 }
 
+// calculate the frequency to bit bang payload
+//  https://github.com/sheaivey/rx5808-pro-diversity/issues/75
+static uint16_t freqMhzToRegVal(uint16_t freqInMhz)
+{
+  uint16_t tf, N, A;
+  tf = (freqInMhz - 479) / 2;
+  N = tf / 32;
+  A = tf % 32;
+  return (N<<7) + A;
+}
+
+//Convert register value to frequency in MHz
+// FreqMHz = 2*(N*32+A) + 479
+//uint16_t regValToFreqMhz(uint16_t regVal)
+//{
+//  uint16_t N, A;
+//  N = regVal >> 7;
+//  A = regVal & 0x3F;
+//  return 2 * (N*32 + A) + 479;
+//}
 
 
-void setChannelModule(uint8_t channel)
+void setChannelByIdx(uint8_t freqIdx)
+{
+  setChannelByRegVal(pgm_read_word_near(channelRegTable + freqIdx));
+}
+
+void setChannelByFreq(uint16_t freqInMhz)
+{
+  setChannelByRegVal(freqMhzToRegVal(freqInMhz));
+}
+
+static void setChannelByRegVal(uint16_t regVal)
 {
   uint8_t i;
-  uint16_t channelData;
-
-  channelData = pgm_read_word_near(channelTable + channel);
 
   // bit bash out 25 bits of data
   // Order: A0-3, !R/W, D0-D19
@@ -335,7 +431,7 @@ void setChannelModule(uint8_t channel)
   for (i = 16; i > 0; i--)
   {
     // Is bit high or low?
-    if (channelData & 0x1)
+    if (regVal & 0x1)
     {
       SERIAL_SENDBIT1();
     }
@@ -345,7 +441,7 @@ void setChannelModule(uint8_t channel)
     }
 
     // Shift bits along to check the next one
-    channelData >>= 1;
+    regVal >>= 1;
   }
 
   // Remaining D16-D19
@@ -361,7 +457,6 @@ void setChannelModule(uint8_t channel)
   digitalWrite(spiClockPin, LOW);
   digitalWrite(spiDataPin, LOW);
 }
-
 
 static void SERIAL_SENDBIT1()
 {

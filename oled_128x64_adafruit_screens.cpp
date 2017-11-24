@@ -116,39 +116,46 @@ void screens::drawTitleBox(const char *title) {
  
 void screens::mainMenuSecondPage(uint8_t menu_id, bool settings_OSD) {
   reset(); // start from fresh screen.
-  drawTitleBox(PSTR2("MAIN MENU"));
+  drawTitleBox(PSTR2("MENU PAGE 2"));
   display.fillRect(0, 10 * menu_id + 12, display.width(), 10, WHITE);
  
   display.setTextColor(menu_id == 0 ? BLACK : WHITE);
   display.setCursor(5, 10 * 0 + 13);
   display.print(PSTR2("SETUP MENU"));
   display.print(PSTR2("         "));
-  display.write(24);
+  display.write(24);         // display up-arrow symbol
  
-  display.setTextColor(menu_id == 0 ? BLACK : WHITE);
-  display.setCursor(5, 10 * 1 + 13);
-  display.print(PSTR2(" "));
+//  display.setTextColor(menu_id == 0 ? BLACK : WHITE);
+//  display.setCursor(5, 10 * 1 + 13);
+//  display.print(PSTR2(" "));
 
-  display.setTextColor(menu_id == 1 ? BLACK : WHITE);
-  display.setCursor(5, 10 * 2 + 3);
+#ifdef USE_DIVERSITY
+  if (isDiversity())
+  {
+    display.setTextColor(menu_id == 1 ? BLACK : WHITE);
+    display.setCursor(5, 10 * 1 + 13);
+    display.print(PSTR2("DIVERSITY"));
+  }
+#endif
+
+  display.setTextColor(menu_id == 2 ? BLACK : WHITE);
+  display.setCursor(5, 10 * 2 + 13);
   display.print(PSTR2("OSD: "));
   if (settings_OSD) 
   {display.print(PSTR2("ON "));}
   else 
   {display.print(PSTR2("OFF"));}
 
-
-  display.setTextColor(menu_id == 2 ? BLACK : WHITE);
-  display.setCursor(5, 10 * 2 + 13);
+  display.setTextColor(menu_id == 3 ? BLACK : WHITE);
+  display.setCursor(5, 10 * 3 + 13);
   display.print(PSTR2("FIND MODEL"));
-
 
   display.display();
 }
  
 void screens::mainMenu(uint8_t menu_id) {
   reset(); // start from fresh screen.
-  drawTitleBox(PSTR2("MODE SELECTION"));
+  drawTitleBox(PSTR2("MENU PAGE 1"));
   display.fillRect(0, 10 * menu_id + 12, display.width(), 10, WHITE);
   display.setTextColor(menu_id == 0 ? BLACK : WHITE);
   display.setCursor(5, 10 * 0 + 13);
@@ -159,19 +166,16 @@ void screens::mainMenu(uint8_t menu_id) {
   display.setTextColor(menu_id == 2 ? BLACK : WHITE);
   display.setCursor(5, 10 * 2 + 13);
   display.print(PSTR2("MANUAL MODE"));
-#ifdef USE_DIVERSITY
-  if (isDiversity())
-  {
-    display.setTextColor(menu_id == 3 ? BLACK : WHITE);
-    display.setCursor(5, 10 * 3 + 13);
-    display.print(PSTR2("DIVERSITY"));
-  }
-#endif
+
+  display.setTextColor(menu_id == 3 ? BLACK : WHITE);
+  display.setCursor(5, 10 * 3 + 13);
+  display.print(PSTR2("BY-MHZ MODE"));
+
   display.setTextColor(menu_id == 4 ? BLACK : WHITE);
   display.setCursor(5, 10 * 4 + 13);
   display.print(PSTR2("FAVORITES"));
   display.print(PSTR2("         "));
-  display.write(25);
+  display.write(25);         // display down-arrow symbol
   display.display();
 }
  
@@ -498,11 +502,14 @@ void screens::screenSaver(uint8_t diversity_mode, uint16_t channelName, uint16_t
   display.print(call_sign);
   display.setTextSize(2);
   display.setCursor(98, 2);
-  display.setTextColor( WHITE);
-  display.print((char)(channelName >> 8));       //band char
-  display.print((char)(channelName & 0xFF));     //channel char
- 
- 
+  display.setTextColor(WHITE);
+
+  if (channelName > 0)
+  {
+    display.print((char)(channelName >> 8));       //band char
+    display.print((char)(channelName & 0xFF));     //channel char
+  }
+
   display.setTextSize(1);
   display.drawLine(0,27,50,27,0);
  

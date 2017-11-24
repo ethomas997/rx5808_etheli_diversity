@@ -121,15 +121,16 @@ SOFTWARE.
 #define STATE_SEEK 1
 #define STATE_SCAN 2
 #define STATE_MANUAL 3
-#ifdef USE_DIVERSITY
-#define STATE_DIVERSITY 4
-#endif
+#define STATE_FREQ_BYMHZ 4
 #define STATE_SETUP_MENU 5
 #define STATE_SAVE 6
-#define STATE_RSSI_SETUP 7
-#define STATE_SCREEN_SAVER 8
-#define STATE_FAVORITE 9 //gc9n
-#define STATE_SCREEN_SAVER_LITE 10
+#ifdef USE_DIVERSITY
+#define STATE_DIVERSITY 7
+#endif
+#define STATE_RSSI_SETUP 8
+#define STATE_SCREEN_SAVER 9
+#define STATE_FAVORITE 10 //gc9n
+#define STATE_SCREEN_SAVER_LITE 11
 
 // Seconds to wait before force entering screensaver
 #define SCREENSAVER_TIMEOUT 6
@@ -163,8 +164,11 @@ SOFTWARE.
 #endif
 #define CHANNEL_MIN 0
 
+#define MIN_CHANNEL_MHZ 5000      //min MHz value for Set by MHz mode
+#define MAX_CHANNEL_MHZ 5999      //max MHz value for Set by MHz mode
+
 #define EEPROM_ADR_STATE 0
-#define EEPROM_ADR_TUNE 1
+#define EEPROM_ADR_CHANIDX 1
 #define EEPROM_ADR_RSSI_MIN_A_L 2
 #define EEPROM_ADR_RSSI_MIN_A_H 3
 #define EEPROM_ADR_RSSI_MAX_A_L 4
@@ -186,6 +190,8 @@ SOFTWARE.
 #define EEPROM_ADR_BEEP 11
 #define EEPROM_ADR_OSD 113
 #define EEPROM_ADR_ORDERBY 12
+#define EEPROM_ADR_FREQMHZ_L 16
+#define EEPROM_ADR_FREQMHZ_H 17
 #define EEPROM_ADR_CALLSIGN 20
 
 #endif // file_defined
