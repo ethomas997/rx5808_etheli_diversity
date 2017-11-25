@@ -40,7 +40,8 @@
 // by Shea Ivey
 #define PSTR2(x) PSTRtoBuffer_P(PSTR(x))
 char PSTR2_BUFFER[30]; // adjust size depending on need.
-char *PSTRtoBuffer_P(PGM_P str) {
+char *PSTRtoBuffer_P(PGM_P str)
+{
   uint8_t c = '\0', i = 0;
   for (; (c = pgm_read_byte(str)) && i < sizeof(PSTR2_BUFFER); str++, i++) PSTR2_BUFFER[i] = c;
   PSTR2_BUFFER[i] = c;
@@ -65,13 +66,15 @@ Adafruit_SSD1306 display(OLED_RESET);
 extern uint8_t system_state;
 
  
-screens::screens() {
+screens::screens()
+{
   last_channel = -1;
   last_rssi = 0;
   best_rssi = 0;
 }
  
-char screens::begin(const char *call_sign) {
+char screens::begin(const char *call_sign)
+{
  
   display.begin(SSD1306_SWITCHCAPVCC, 0x3C);  // initialize with the I2C addr 0x3D or 0x3C (for the 128x64)
  
@@ -90,33 +93,41 @@ char screens::begin(const char *call_sign) {
   return 0; // no errors
 }
  
-void screens::reset() {
+void screens::reset()
+{
   display.clearDisplay();
   display.setCursor(0, 0);
   display.setTextSize(1);
   display.setTextColor(WHITE);
 }
  
-void screens::flip() {
+void screens::flip()
+{
   display.setRotation(2);
 }
  
-void screens::drawTitleBox(const char *title) {
+void screens::drawTitleBox(const char *title, bool centerFlag)
+{
   display.drawRect(0, 0, display.width(), display.height(), WHITE);
   display.fillRect(0, 0, display.width(), 11, WHITE);
  
   display.setTextSize(1);
   display.setTextColor(BLACK);
-  // center text
-  display.setCursor(((display.width() - (strlen(title) * 6)) / 2), 2);
+
+  if (centerFlag)
+    display.setCursor(((display.width() - (strlen(title) * 6)) / 2), 2);
+  else
+    display.setCursor(2, 2);
+
   display.print(title);
   
   display.setTextColor(WHITE);
 }
  
-void screens::mainMenuSecondPage(uint8_t menu_id, bool settings_OSD) {
+void screens::mainMenuSecondPage(uint8_t menu_id, bool settings_OSD)
+{
   reset(); // start from fresh screen.
-  drawTitleBox(PSTR2("MENU PAGE 2"));
+  drawTitleBox(PSTR2(PROG_REVISION_STR "  MENU 2"), false);
   display.fillRect(0, 10 * menu_id + 12, display.width(), 10, WHITE);
  
   display.setTextColor(menu_id == 0 ? BLACK : WHITE);
@@ -140,22 +151,25 @@ void screens::mainMenuSecondPage(uint8_t menu_id, bool settings_OSD) {
 
   display.setTextColor(menu_id == 2 ? BLACK : WHITE);
   display.setCursor(5, 10 * 2 + 13);
-  display.print(PSTR2("OSD: "));
-  if (settings_OSD) 
-  {display.print(PSTR2("ON "));}
-  else 
-  {display.print(PSTR2("OFF"));}
+  display.print(PSTR2("FIND MODEL"));
 
+#ifdef USE_GC9N_OSD
   display.setTextColor(menu_id == 3 ? BLACK : WHITE);
   display.setCursor(5, 10 * 3 + 13);
-  display.print(PSTR2("FIND MODEL"));
+  display.print(PSTR2("OSD: "));
+  if (settings_OSD) 
+    display.print(PSTR2("ON "));
+  else 
+    display.print(PSTR2("OFF"));
+#endif
 
   display.display();
 }
  
-void screens::mainMenu(uint8_t menu_id) {
+void screens::mainMenu(uint8_t menu_id)
+{
   reset(); // start from fresh screen.
-  drawTitleBox(PSTR2("MENU PAGE 1"));
+  drawTitleBox(PSTR2(PROG_REVISION_STR "  MENU 1"), false);
   display.fillRect(0, 10 * menu_id + 12, display.width(), 10, WHITE);
   display.setTextColor(menu_id == 0 ? BLACK : WHITE);
   display.setCursor(5, 10 * 0 + 13);
@@ -179,7 +193,8 @@ void screens::mainMenu(uint8_t menu_id) {
   display.display();
 }
  
-void screens::seekMode(uint8_t state) {
+void screens::seekMode(uint8_t state)
+{
   last_channel = -1;
   reset(); // start from fresh screen.
   if (state == STATE_FAVORITE)
@@ -195,12 +210,13 @@ void screens::seekMode(uint8_t state) {
     drawTitleBox(PSTR2("AUTO SEEK MODE"));
   }
   display.setTextColor(WHITE);
-     display.drawFastHLine(0, 20, display.width(), WHITE);
-     display.drawFastHLine(0, 32, display.width(), WHITE);
+  display.drawFastHLine(0, 20, display.width(), WHITE);
+  display.drawFastHLine(0, 32, display.width(), WHITE);
   display.setCursor(5, 12);
   display.drawLine(97, 11, 97, 20, WHITE);
   display.print(PSTR2("BAND:"));
-  for (uint16_t i = 0; i < 8; i++) {
+  for (uint16_t i = 0; i < 8; i++)
+  {
     display.setCursor(15 * i + 8, 23);
     display.print((char) (i + '1'));
   }
@@ -220,7 +236,8 @@ void screens::seekMode(uint8_t state) {
 }
  
 void screens::FavDelete( uint16_t channelFrequency, uint8_t channel)
-{ reset(); // start from fresh screen.
+{
+  reset(); // start from fresh screen.
   drawTitleBox(PSTR2("DELETE FAVORITE CHAN"));
   display.setTextColor(WHITE);
   display.setCursor(5, 8 * 1 + 4);
@@ -235,11 +252,10 @@ void screens::FavDelete( uint16_t channelFrequency, uint8_t channel)
   display.setCursor(((display.width() - 11 * 6) / 2), 8 * 6 + 4);
   display.print(PSTR2("-- DELETED --"));
   display.display();
- 
-  }
+}
  
 void screens::FavSel(uint8_t favchan) 
- {//gc9n
+{//gc9n
   reset(); // start from fresh screen.
   drawTitleBox(PSTR2("SELECTED FAVORITE CH"));
   display.setTextSize(5);
@@ -247,8 +263,8 @@ void screens::FavSel(uint8_t favchan)
   display.setCursor(20, 20);
   display.print(favchan);
   
-   display.display();
-   reset();
+  display.display();
+  reset();
 }
  
 //void screens::FavReorg(uint8_t favchan) 
@@ -269,8 +285,8 @@ void screens::FavSel(uint8_t favchan)
 //  delay(1500);
 //}
  
- void screens::NoFav() 
- {
+void screens::NoFav()
+{
   reset(); // start from fresh screen.
   drawTitleBox(PSTR2("FAVORITES"));
  
@@ -283,7 +299,8 @@ void screens::FavSel(uint8_t favchan)
  
 char scan_position = 3;
  
-void screens::updateSeekMode(uint8_t state, uint8_t channelIndex, uint8_t channel, uint8_t rssi, uint16_t channelFrequency, uint8_t rssi_seek_threshold, bool locked) {
+void screens::updateSeekMode(uint8_t state, uint8_t channelIndex, uint8_t channel, uint8_t rssi, uint16_t channelFrequency, uint8_t rssi_seek_threshold, bool locked)
+{
   // display refresh handler
   if (channel != last_channel) // only updated on changes
   {
@@ -389,7 +406,8 @@ void screens::updateSeekMode(uint8_t state, uint8_t channelIndex, uint8_t channe
   display.display();
 }
  
-void screens::bandScanMode(uint8_t state) {
+void screens::bandScanMode(uint8_t state)
+{
  reset(); // start from fresh screen.
   best_rssi = 0;
   if (state == STATE_SCAN)
@@ -420,7 +438,8 @@ void screens::bandScanMode(uint8_t state) {
   display.display();
 }
  
-void screens::updateBandScanMode(bool in_setup, uint8_t channel, uint8_t rssi, uint16_t channelName, uint16_t channelFrequency, uint16_t rssi_setup_min_a, uint16_t rssi_setup_max_a) {
+void screens::updateBandScanMode(bool in_setup, uint8_t channel, uint8_t rssi, uint16_t channelName, uint16_t channelFrequency, uint16_t rssi_setup_min_a, uint16_t rssi_setup_max_a)
+{
 #define SCANNER_LIST_X_POS 60
   static uint8_t writePos = SCANNER_LIST_X_POS;
   uint8_t rssi_scaled = map(rssi, 1, 100, 1, 30);
@@ -475,10 +494,13 @@ void screens::updateBandScanMode(bool in_setup, uint8_t channel, uint8_t rssi, u
   last_channel = channel;
 }
  
-void screens::screenSaver(uint16_t channelName, uint16_t channelFrequency, const char *call_sign) {
+void screens::screenSaver(uint16_t channelName, uint16_t channelFrequency, const char *call_sign)
+{
   screenSaver(-1, channelName, channelFrequency, call_sign);
 }
-void screens::screenSaver(uint8_t diversity_mode, uint16_t channelName, uint16_t channelFrequency, const char *call_sign) {
+
+void screens::screenSaver(uint8_t diversity_mode, uint16_t channelName, uint16_t channelFrequency, const char *call_sign)
+{
   reset();
 //  display.setTextSize(6);
 //  display.setTextColor(WHITE);
@@ -549,36 +571,39 @@ void screens::screenSaver(uint8_t diversity_mode, uint16_t channelName, uint16_t
   display.display();
 }
  
-void screens::updateScreenSaver(uint8_t rssi) {
+void screens::updateScreenSaver(uint8_t rssi)
+{
   updateScreenSaver(-1, rssi, -1, -1 );
 }
-void screens::updateScreenSaver(char active_receiver, uint8_t rssi, uint8_t rssiA, uint8_t rssiB ) {
-  
-  if (system_state == STATE_SCREEN_SAVER_LITE) {
-           reset(); // start from fresh screen.
-          uint8_t rssi_scaled = map(rssiA, 1, 100, 3, 119);
-          display.fillRect(0, 30, rssi_scaled, 30, WHITE);
-          display.drawRect(0, 30, 119, 30, WHITE);
-          display.setTextSize(4);
-          display.setTextColor(WHITE);
-          display.setCursor(20, 0);
-          display.print(rssiA);
-          display.print(PSTR2("% A"));
-          display.setCursor(0, 0);
-          uint8_t character;
 
-          if (rssiA<50)
-          { character=25;
-          }
-          else
-          { character=24;}
-          display.write(character);
-         
+void screens::updateScreenSaver(char active_receiver, uint8_t rssi, uint8_t rssiA, uint8_t rssiB)
+{
+  
+  if (system_state == STATE_SCREEN_SAVER_LITE)
+  {
+    reset(); // start from fresh screen.
+    uint8_t rssi_scaled = map(rssiA, 1, 100, 3, 119);
+    display.fillRect(0, 30, rssi_scaled, 30, WHITE);
+    display.drawRect(0, 30, 119, 30, WHITE);
+    display.setTextSize(4);
+    display.setTextColor(WHITE);
+    display.setCursor(20, 0);
+    display.print(rssiA);
+    display.print(PSTR2("% A"));
+    display.setCursor(0, 0);
+    uint8_t character;
+
+    if (rssiA<50)
+      character = 25;
+    else
+      character = 24;
+    display.write(character);
   }
   else
   {
     #ifdef USE_DIVERSITY
-      if (isDiversity()) {
+      if (isDiversity())
+      {
         // read rssi A
           #define RSSI_BAR_SIZE 119
         uint8_t rssi_scaled = map(rssiA, 1, 100, 3, RSSI_BAR_SIZE);
@@ -606,16 +631,17 @@ void screens::updateScreenSaver(char active_receiver, uint8_t rssi, uint8_t rssi
           display.drawRect(7, display.height() - 13, rssi_scaled, 13, WHITE);
         }
       }
-//      else {
-//        display.setTextColor(BLACK);
-//        display.fillRect(0, display.height() - 27, 25, 19, WHITE);
-//        display.setCursor(1, display.height() - 13);
-//        display.print(PSTR2("RSSI"));
-//    #define RSSI_BAR_SIZE 101
-//        uint8_t rssi_scaled = map(rssi, 1, 100, 1, RSSI_BAR_SIZE);
-//        display.fillRect(25 + rssi_scaled, display.height() - 19, (RSSI_BAR_SIZE - rssi_scaled), 19, BLACK);
-//        display.fillRect(25, display.height() - 27, rssi_scaled, 19, WHITE);
- //     }
+      else
+      {
+        display.setTextColor(BLACK);
+        display.fillRect(0, display.height() - 27, 25, 19, WHITE);
+        display.setCursor(1, display.height() - 13);
+        display.print(PSTR2("RSSI"));
+    #define RSSI_BAR_SIZE 101
+        uint8_t rssi_scaled = map(rssi, 1, 100, 1, RSSI_BAR_SIZE);
+        display.fillRect(25 + rssi_scaled, display.height() - 19, (RSSI_BAR_SIZE - rssi_scaled), 19, BLACK);
+        display.fillRect(25, display.height() - 27, rssi_scaled, 19, WHITE);
+      }
     #else
       display.setTextColor(BLACK);
       display.fillRect(0, display.height() - 27, 25, 19, WHITE);
@@ -644,7 +670,8 @@ void screens::updateScreenSaver(char active_receiver, uint8_t rssi, uint8_t rssi
 }
  
 #ifdef USE_DIVERSITY
-void screens::diversity(uint8_t diversity_mode) {
+void screens::diversity(uint8_t diversity_mode)
+{
  
   reset();
   drawTitleBox(PSTR2("DIVERSITY"));
@@ -673,7 +700,8 @@ void screens::diversity(uint8_t diversity_mode) {
   display.display();
 }
  
-void screens::updateDiversity(char active_receiver, uint8_t rssiA, uint8_t rssiB) {
+void screens::updateDiversity(char active_receiver, uint8_t rssiA, uint8_t rssiB)
+{
 #define RSSI_BAR_SIZE 108
   uint8_t rssi_scaled = map(rssiA, 1, 100, 1, RSSI_BAR_SIZE);
  
@@ -705,9 +733,12 @@ void screens::updateDiversity(char active_receiver, uint8_t rssiA, uint8_t rssiB
 #endif
  
  
-void screens::setupMenu() {
+void screens::setupMenu()
+{
 }
-void screens::updateSetupMenu(uint8_t menu_id, bool settings_beeps, bool settings_orderby_channel, const char *call_sign  , char editing) {
+
+void screens::updateSetupMenu(uint8_t menu_id, bool settings_beeps, bool settings_orderby_channel, const char *call_sign  , char editing)
+{
   reset();
   drawTitleBox(PSTR2("SETUP MENU"));
   //selected
@@ -759,7 +790,8 @@ void screens::updateSetupMenu(uint8_t menu_id, bool settings_beeps, bool setting
   display.display();
 }
  
-void screens::save(uint8_t mode, uint8_t channelIndex, uint16_t channelFrequency, const char *call_sign,int lfav) {
+void screens::save(uint8_t mode, uint8_t channelIndex, uint16_t channelFrequency, const char *call_sign,int lfav)
+{
   reset();
   drawTitleBox(PSTR2("SAVE SETTINGS"));
  
@@ -841,7 +873,8 @@ void screens::save(uint8_t mode, uint8_t channelIndex, uint16_t channelFrequency
   display.display();
 }
  
-void screens::updateSave(const char * msg) {
+void screens::updateSave(const char * msg)
+{
   display.setTextColor(WHITE, BLACK);
   display.setCursor(((display.width() - strlen(msg) * 6) / 2), 8 * 6 + 4);
   display.print(msg);

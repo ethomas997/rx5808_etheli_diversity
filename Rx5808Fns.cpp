@@ -77,8 +77,10 @@ extern char diversity_check_count; // used to decide when to change antennas.
 #endif
 
 
+#ifdef USE_GC9N_OSD
 void SendToOSD();
 extern int OSDParams[4];
+#endif
 
 //Returns the index into the channel-sorted-indices table for the entry
 // corresponding to the given value.
@@ -310,11 +312,13 @@ uint16_t readRSSI(char receiver)
     if ((p_active_receiver != active_receiver)  || ((rssi - 60 > p_rssi) ||  (rssi + 60 < p_rssi)))
     { p_active_receiver = active_receiver;
       p_rssi = rssi ;
+#ifdef USE_GC9N_OSD
       OSDParams[0] = rssiA; //rssiA; //this is  A
       OSDParams[1] = rssiB; //rssiB; //this is  B
       OSDParams[2] = receiver; //active_receiver; //CUrrent reciever
       OSDParams[3] = -1; //THIS is for rssi method
       SendToOSD();
+#endif
       time_screen_saver2 = 1;
     }
   }

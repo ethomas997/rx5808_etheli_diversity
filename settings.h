@@ -1,6 +1,5 @@
 /*
  * Setings file 
-GC9n
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -24,9 +23,9 @@ SOFTWARE.
 #ifndef settings_h
 #define settings_h
 
+#define PROG_REVISION_STR "RX5808 v0.01"
 
 // #define Debug
-
 
 // Choose the display you will be using
 // you will also have to uncomment the includes in the main project.
@@ -48,8 +47,12 @@ SOFTWARE.
 // Feature Togglels
 #define USE_DIVERSITY
 
+// uncomment to enable OSD support by GC9N
+//#define USE_GC9N_OSD
+
 //#define USE_FLIP_SCREEN
 #define USE_BOOT_LOGO
+
 // Choose if you wish to use 8 additional Channels 
 // 5362 MHz 5399 MHz 5436 MHz 5473 MHz 5510 MHz 5547 MHz 5584 MHz 5621 MHz
 // Local laws may prohibit the use of these frequencies use at your own risk!
@@ -131,12 +134,12 @@ SOFTWARE.
 #define STATE_SCREEN_SAVER 9
 #define STATE_FAVORITE 10 //gc9n
 #define STATE_SCREEN_SAVER_LITE 11
+#define STATE_MAX_VALUE STATE_SCREEN_SAVER_LITE
+
+#define START_STATE STATE_SEEK
 
 // Seconds to wait before force entering screensaver
 #define SCREENSAVER_TIMEOUT 6
-
-#define START_STATE STATE_SEEK
-#define MAX_STATE STATE_MANUAL
 
 #define CHANNEL_BAND_SIZE 8
 #define CHANNEL_MIN_INDEX 0
@@ -167,31 +170,11 @@ SOFTWARE.
 #define MIN_CHANNEL_MHZ 5000      //min MHz value for Set by MHz mode
 #define MAX_CHANNEL_MHZ 5999      //max MHz value for Set by MHz mode
 
-#define EEPROM_ADR_STATE 0
-#define EEPROM_ADR_CHANIDX 1
-#define EEPROM_ADR_RSSI_MIN_A_L 2
-#define EEPROM_ADR_RSSI_MIN_A_H 3
-#define EEPROM_ADR_RSSI_MAX_A_L 4
-#define EEPROM_ADR_RSSI_MAX_A_H 5
 #ifdef USE_DIVERSITY
-
-    #define EEPROM_ADR_DIVERSITY 6
-    #define EEPROM_ADR_RSSI_MIN_B_L 7
-    #define EEPROM_ADR_RSSI_MIN_B_H 8
-    #define EEPROM_ADR_RSSI_MAX_B_L 9
-    #define EEPROM_ADR_RSSI_MAX_B_H 10
-
-    // used to figure out if diversity module has been plugged in.
-    // When RSSI is plugged in the min value is around 90
-    // When RSSI is not plugged in the min value is 0
-    #define isDiversity() (analogRead(rssiPinB) >= 5)
+// used to figure out if diversity module has been plugged in.
+// When RSSI is plugged in the min value is around 90
+// When RSSI is not plugged in the min value is 0
+#define isDiversity() (analogRead(rssiPinB) >= 5)
 #endif
-
-#define EEPROM_ADR_BEEP 11
-#define EEPROM_ADR_OSD 113
-#define EEPROM_ADR_ORDERBY 12
-#define EEPROM_ADR_FREQMHZ_L 16
-#define EEPROM_ADR_FREQMHZ_H 17
-#define EEPROM_ADR_CALLSIGN 20
 
 #endif // file_defined
