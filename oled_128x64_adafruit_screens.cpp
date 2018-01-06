@@ -859,7 +859,7 @@ void screens::save(uint8_t mode, uint8_t channelIndex, uint16_t channelFrequency
   display.print(lfav);
   }
   display.setCursor(5, 8 * 4 + 4);
-  display.print(PSTR2("FREQ:     GHz"));
+  display.print(PSTR2("FREQ:     MHz"));
   display.setCursor(38, 8 * 4 + 4);
   display.print(channelFrequency);
 // 

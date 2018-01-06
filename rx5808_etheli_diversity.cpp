@@ -18,9 +18,9 @@
      Renamed 'C' and 'D' band names to 'R' and 'L'
      Various code and functionality improvements
 
-  The MIT License (MIT)
+  --------------------------------------------------------------------------
 
-  Copyright (c) 2015 Marko Hoepken
+  The MIT License (MIT)
 
   Permission is hereby granted, free of charge, to any person obtaining a copy
   of this software and associated documentation files (the "Software"), to deal
@@ -83,17 +83,21 @@ screens drawScreen;
 #define EEPROM_ADR_ORDERBY 12
 #define EEPROM_ADR_OSD 14
 #define EEPROM_ADRW_FREQMHZ 16
-#define EEPROM_ADRW_CHECKWORD 18       // integrity-check value EEPROM
+#define EEPROM_ADRW_CHECKWORD 18       // integrity-check value for EEPROM
 #define EEPROM_ADR_CALLSIGN 20
+#define EEPROM_ADR_LAST_FAVIDX 60      // index of last favorite used
 
-#define EEPROM_ADR_TUNE_FAV_LAST 108
+//address for favs list in EEPROM (array of 2-byte words)
+#define EEPROM_ADRA_FAVLIST 64
+#define FAV_NUMBER_OF_SLOTS 10         // number of favorite channels
 
-#define EEPROM_CHECK_VALUE 0x2759      // EEPROM integrity-check value
+#define CALL_SIGN_SIZE 10              // size of 'call_sign[]' array
 
-#define EEPROM_WRITE_WORD(addr,val) EEPROM.write((addr),lowByte(val));\
-                                    EEPROM.write((addr+1),highByte(val));
-#define EEPROM_READ_WORD(addr) ((((uint16_t)EEPROM.read(addr+1)) << 8) +\
-                               EEPROM.read(addr))
+#define EEPROM_CHECK_VALUE 0x2719      // EEPROM integrity-check value
+
+#define IS_FAVENTRY_VALID(val) (((val) <= CHANNEL_MAX_INDEX ||\
+                    ((val) >= MIN_CHANNEL_MHZ && (val) <= MAX_CHANNEL_MHZ)))
+
 
 #ifdef USE_GC9N_OSD
 #define MAX_MENU_COUNT 8
@@ -108,15 +112,18 @@ uint16_t channelIndexToName(uint8_t idx);
 uint16_t getCurrentChannelInMhz();
 void saveChannelToEEPROM();
 void beep(uint16_t time);
-void FillTemp_Tune_fav(int FavChannelx);
+void initializeFavorites();
+bool addFreqOrIdxToFavs(uint16_t fVal);
+boolean deleteCurrentFavEntry();
+int getEntryForFavIndex(uint8_t fIdx);
+void nextOrPrevFavEntry(boolean nextFlag);
+int getFavIndexForFreqOrIdx(uint16_t fVal);
 #ifdef USE_GC9N_OSD
 void SendToOSD();
 #endif
-int8_t FSButtonDirection ();
-
-int EEPROM_ADR_TUNE_FAV[10]  = {100, 101, 102, 103, 104, 105, 106, 107, 110, 111};
-int temp_EEPROM_ADR_TUNE_FAV[10] = {255, 255, 255, 255, 255, 255, 255, 255, 255, 255};
-//setting the 10 favorite channels memory blocks George Chatzisavvidis GC9N
+int8_t FSButtonDirection();
+void writeWordToEeprom(int addr, uint16_t val);
+uint16_t readWordFromEeprom(int addr);
 
 #ifdef USE_GC9N_OSD
 int OSDParams[4] = {0, 3, 0, 0};
@@ -149,7 +156,6 @@ char last_state_menu_id = 2;
 uint8_t last_state = START_STATE + 1; // force screen draw
 uint8_t active_receiver = useReceiverA;
 
-uint16_t rssi_best = 0; // used for band scanner
 uint16_t rssi_min_a = RSSI_MIN_VAL;
 uint16_t rssi_max_a = RSSI_MAX_VAL;
 uint16_t rssi_setup_min_a = RSSI_MIN_VAL;
@@ -161,7 +167,6 @@ uint16_t rssi_setup_min_b = RSSI_MIN_VAL;
 uint16_t rssi_setup_max_b = RSSI_MAX_VAL;
 #endif
 
-static uint8_t rssi_seek_threshold = RSSI_SEEK_TRESHOLD;
 static uint8_t rssi_setup_run = 0;
 static bool force_menu_redraw = 0;
 
@@ -173,29 +178,29 @@ static uint8_t switch_count = 0;
 static uint8_t last_channel_index = 0xFF;
 static uint16_t last_channel_mhz = 0;
 static uint8_t force_seek = 0;
-static uint8_t seek_direction = 1;
+static bool seek_forward_flag = true;
 static unsigned long time_screen_saver = 0;
 static uint8_t seek_found = 0;
 static uint8_t scan_start = 0;
 static bool stateManualInitFlag = false;
 static uint8_t play_startup_beeps = 1;
 
-static char call_sign[10];
+static char call_sign[CALL_SIGN_SIZE];
 static bool settings_beeps = true;
 #ifdef USE_GC9N_OSD
 static bool settings_OSD = false;
 #endif
 static bool settings_orderby_channel = true;
-static bool HaveFav = false;
-static bool RefreshFav = false;
-static uint8_t FirstFav = 0;
+static bool favModeInProgressFlag = false;
 //static bool FATSHARK_BUTTON_PUSHED=false;
 //static int  LAST_FATSHARK_BUTTON_STATE=0;
-static int lfavs = 0;
 static byte FS_BUTTON_DIR = 0;
 
+static uint8_t currentFavoritesCount = 0;
+static uint8_t currentFavoritesIndex = 0;
 static bool chanChangedSaveFlag = false;
 static bool previousUpDnButtonFlag = false;
+static bool fromScreenSaverFlag = false;
 
 
 // SETUP ----------------------------------------------------------------------------
@@ -230,16 +235,18 @@ void setup()
   pinMode (spiDataPin, OUTPUT);
   pinMode (spiClockPin, OUTPUT);
 
-  // use values only of EEprom is not 255 = unsaved
-  uint8_t eeprom_check = EEPROM.read(EEPROM_ADR_STATE);
-
   // check EEPROM-integrity value; write defaults if mismatch
-  if (EEPROM_READ_WORD(EEPROM_ADRW_CHECKWORD) != EEPROM_CHECK_VALUE)
+  if (readWordFromEeprom(EEPROM_ADRW_CHECKWORD) != EEPROM_CHECK_VALUE)
   {
+
+    for (int i=0; i<=255; ++i)
+      EEPROM.write(i, (uint8_t)255);
+
     EEPROM.write(EEPROM_ADR_STATE, START_STATE);
     EEPROM.write(EEPROM_ADR_CHANIDX, CHANNEL_MIN_INDEX);
-    EEPROM_WRITE_WORD(EEPROM_ADRW_FREQMHZ, 0);
+    writeWordToEeprom(EEPROM_ADRW_FREQMHZ, 0);
     EEPROM.write(EEPROM_ADR_BEEP, settings_beeps);
+    EEPROM.write(EEPROM_ADR_LAST_FAVIDX, 0);
 #ifdef USE_GC9N_OSD
     EEPROM.write(EEPROM_ADR_OSD, settings_OSD);
 #else
@@ -247,12 +254,12 @@ void setup()
 #endif
     EEPROM.write(EEPROM_ADR_ORDERBY, settings_orderby_channel);
     // save 16 bit
-    EEPROM_WRITE_WORD(EEPROM_ADRW_RSSI_MIN_A, RSSI_MIN_VAL);
+    writeWordToEeprom(EEPROM_ADRW_RSSI_MIN_A, RSSI_MIN_VAL);
     // save 16 bit
-    EEPROM_WRITE_WORD(EEPROM_ADRW_RSSI_MAX_A, RSSI_MAX_VAL);
+    writeWordToEeprom(EEPROM_ADRW_RSSI_MAX_A, RSSI_MAX_VAL);
 
     // save default call sign
-    strcpy(call_sign, CALL_SIGN); // load callsign
+    strncpy(call_sign, CALL_SIGN, CALL_SIGN_SIZE); // load callsign
     for (uint8_t i = 0; i < sizeof(call_sign); i++)
     {
       EEPROM.write(EEPROM_ADR_CALLSIGN + i, call_sign[i]);
@@ -262,24 +269,38 @@ void setup()
     // diversity
     EEPROM.write(EEPROM_ADR_DIVERSITY, diversity_mode);
     // save 16 bit
-    EEPROM_WRITE_WORD(EEPROM_ADRW_RSSI_MIN_B, RSSI_MIN_VAL);
+    writeWordToEeprom(EEPROM_ADRW_RSSI_MIN_B, RSSI_MIN_VAL);
     // save 16 bit
-    EEPROM_WRITE_WORD(EEPROM_ADRW_RSSI_MAX_B, RSSI_MAX_VAL);
+    writeWordToEeprom(EEPROM_ADRW_RSSI_MAX_B, RSSI_MAX_VAL);
 #endif
 
     // write EEPROM-integrity check value
-    EEPROM_WRITE_WORD(EEPROM_ADRW_CHECKWORD, EEPROM_CHECK_VALUE);
+    writeWordToEeprom(EEPROM_ADRW_CHECKWORD, EEPROM_CHECK_VALUE);
   }
 
   // read saved settings from EEPROM
   system_state = EEPROM.read(EEPROM_ADR_STATE);
   state_last_used = system_state;
   current_channel_index = EEPROM.read(EEPROM_ADR_CHANIDX);
+  if (current_channel_index > CHANNEL_MAX_INDEX)
+  {
+    current_channel_index = 0;
+    EEPROM.write(EEPROM_ADR_CHANIDX, 0);
+  }
+  channel_sort_idx = getChannelSortTableIndex(current_channel_index);
   tracking_channel_index = current_channel_index;
-  current_channel_mhz = EEPROM_READ_WORD(EEPROM_ADRW_FREQMHZ);
+  current_channel_mhz = readWordFromEeprom(EEPROM_ADRW_FREQMHZ);
+  if (current_channel_mhz < MIN_CHANNEL_MHZ ||
+      current_channel_mhz > MAX_CHANNEL_MHZ)
+  {
+    current_channel_mhz = 0;
+  }
 
   // set the channel as soon as we can for faster boot up times
   setTunerToCurrentChannel();
+
+  // initialize 'favorites' variables
+  initializeFavorites();
 
   settings_beeps = EEPROM.read(EEPROM_ADR_BEEP);
 #ifdef USE_GC9N_OSD
@@ -294,12 +315,12 @@ void setup()
     call_sign[i] = EEPROM.read(EEPROM_ADR_CALLSIGN + i);
   }
 
-  rssi_min_a = EEPROM_READ_WORD(EEPROM_ADRW_RSSI_MIN_A);
-  rssi_max_a = EEPROM_READ_WORD(EEPROM_ADRW_RSSI_MAX_A);
+  rssi_min_a = readWordFromEeprom(EEPROM_ADRW_RSSI_MIN_A);
+  rssi_max_a = readWordFromEeprom(EEPROM_ADRW_RSSI_MAX_A);
 #ifdef USE_DIVERSITY
   diversity_mode = EEPROM.read(EEPROM_ADR_DIVERSITY);
-  rssi_min_b = EEPROM_READ_WORD(EEPROM_ADRW_RSSI_MIN_B);
-  rssi_max_b = EEPROM_READ_WORD(EEPROM_ADRW_RSSI_MAX_B);
+  rssi_min_b = readWordFromEeprom(EEPROM_ADRW_RSSI_MIN_B);
+  rssi_max_b = readWordFromEeprom(EEPROM_ADRW_RSSI_MAX_B);
 #endif
   force_menu_redraw = 1;
 
@@ -372,6 +393,10 @@ void loop()
     {
       system_state = STATE_SEEK;
     }
+
+    // reset flag so favorites mode will "restart"
+    favModeInProgressFlag = false;
+
     in_menu = 1;
     in_menu_time_out = 50; // 20x 100ms = 5 seconds
     /*
@@ -381,8 +406,11 @@ void loop()
       Any Mode will refresh screen
       If not MODE changes in 2 seconds, it uses last used mode
     */
+    char tracked_menu_id;
     do
     {
+      // init tracker for item to be selected when menu resumed later on
+      tracked_menu_id = last_state_menu_id;
 
       if (press_time >= 10) // if menu held for 1 second invoke quick save.
       {
@@ -401,12 +429,21 @@ void loop()
         chanChangedSaveFlag = false;
         saveChannelToEEPROM();
       }
- 
+
+      // if press while manual-mode showing then jump to screen saver
+      if (system_state == STATE_MANUAL && !fromScreenSaverFlag)
+      {
+        in_menu = 0;
+        system_state = STATE_SCREEN_SAVER;
+        fromScreenSaverFlag = true;
+        break;
+      }
+
       switch (menu_id)
       {
         case 0: // AUTO MODE
           system_state = STATE_SEEK;
-          last_state_menu_id = menu_id;
+          tracked_menu_id = menu_id;
           force_seek = 1;
           seek_found = 0;
           break;
@@ -416,15 +453,15 @@ void loop()
           break;
         case 2: // manual mode
           system_state = STATE_MANUAL;
-          last_state_menu_id = menu_id;
+          tracked_menu_id = menu_id;
           break;
         case 3: // Set freq by MHz
           system_state = STATE_FREQ_BYMHZ;
-          last_state_menu_id = menu_id;
+          tracked_menu_id = menu_id;
           break;
         case 4: // Favorites Menu       //gc9n
           system_state = STATE_FAVORITE;       //gc9n
-          last_state_menu_id = menu_id;
+          tracked_menu_id = menu_id;
           break;                        //gc9n
         case 5: // Setup Menu           //gc9n
           system_state = STATE_SETUP_MENU;     //gc9n
@@ -500,9 +537,18 @@ void loop()
         {
 
           // Serial.read();
-          if (digitalRead(buttonMode) != LOW) {
-            system_state = state_last_used; // exit to last state on timeout.
+          if (digitalRead(buttonMode) != LOW)
+          {  //button not pressed; timeout
+            if (state_last_used != STATE_SCAN)
+              system_state = state_last_used; // exit to last state on timeout.
+            else
+            {  //last state was bandscan; resume to manual or byMHz mode
+              system_state = (last_state_menu_id != 3) ? STATE_MANUAL :
+                                                         STATE_FREQ_BYMHZ;;
+            }
           }
+          else  //button pressed; set id for item to be selected when menu resumed
+            last_state_menu_id = tracked_menu_id;
           in_menu = 0; // EXIT
           beep(KEY_DEBOUNCE / 2); // beep & debounce
           delay(50); // debounce
@@ -604,22 +650,24 @@ void loop()
         // trigger new scan from begin
         channel_sort_idx = CHANNEL_MIN;
         current_channel_index = getChannelSortTableEntry(channel_sort_idx);
-        rssi_best = 0;
         scan_start = 1;
         drawScreen.bandScanMode(system_state);
         break;
-      case STATE_SEEK: // seek mode
-        rssi_seek_threshold = RSSI_SEEK_TRESHOLD;
-        rssi_best = 0;
-        force_seek = 1;
-      case STATE_MANUAL: // manual mode
+      case STATE_SEEK:    // seek mode
+      case STATE_MANUAL:  // manual mode
         if (system_state == STATE_MANUAL)
         {
           time_screen_saver = millis();
           stateManualInitFlag = true;       //indicate just entered state
+          if (system_state != state_last_used)
+          {
+            // save so state is resumed after restart
+            EEPROM.write(EEPROM_ADR_STATE, system_state);
+          }
         }
-        else if (system_state == STATE_SEEK)
+        else //if (system_state == STATE_SEEK)
         {
+          force_seek = 1;
           time_screen_saver = 0; // dont show screen saver until we found a channel.
           stateManualInitFlag = false;
         }
@@ -639,12 +687,10 @@ void loop()
         break;
 #endif
       case STATE_SETUP_MENU:
-
         break;
-      case STATE_SAVE:
 
+      case STATE_SAVE:
         EEPROM.write(EEPROM_ADR_CHANIDX, current_channel_index);
-        EEPROM.write(EEPROM_ADR_STATE, state_last_used);
         EEPROM.write(EEPROM_ADR_BEEP, settings_beeps);
         EEPROM.write(EEPROM_ADR_ORDERBY, settings_orderby_channel);
         // save call sign
@@ -656,104 +702,82 @@ void loop()
 #endif
 
         ///////////////////////FAVORITIES SAVE Gc9n
-        if (last_state != STATE_SETUP_MENU  && state_last_used != STATE_FAVORITE ) // if you didnt came from menu setup  save favorite
-        {
-          if ( EEPROM.read(EEPROM_ADR_TUNE_FAV[9]) != 255) //ALL FAVS full gc9n
-          {
-            int lfav;
-            lfav = EEPROM.read(EEPROM_ADR_TUNE_FAV_LAST);
-            if (lfav == 9)
-            {
-              lfav = 0;
-            }
-            else
-            {
-              lfav = lfav + 1;
-            }
-            EEPROM.write(EEPROM_ADR_TUNE_FAV[lfav], 255); // rotate the favs if full
-            EEPROM.write(EEPROM_ADR_TUNE_FAV_LAST, lfav);
-          }
-          for (int i = 0; i < 10; i++)
-          {
-            if ( EEPROM.read(EEPROM_ADR_TUNE_FAV[i]) == 255) //not used  gc9n
-            {
-              EEPROM.write(EEPROM_ADR_TUNE_FAV[i], current_channel_index);
-              EEPROM.write(EEPROM_ADR_TUNE_FAV_LAST, i);
-              i = 12; //exit loop
-            }
-          }
+        if (last_state != STATE_SETUP_MENU  && state_last_used != STATE_FAVORITE )
+        {  //didn't come from menu setup; save favorite
+          bool newFlag = addFreqOrIdxToFavs((current_channel_mhz == 0) ?
+                             current_channel_index : current_channel_mhz);
 #ifdef USE_GC9N_OSD
           OSDParams[0] = -2; //this is save
           OSDParams[1] = 0; //By default goes over manual
           SendToOSD(); //UPDATE OSD
 #endif
-          drawScreen.save(state_last_used, current_channel_index, getCurrentChannelInMhz(), call_sign, EEPROM.read(EEPROM_ADR_TUNE_FAV_LAST) + 1);
+          if (newFlag)
+          {  //new favorite added
+            drawScreen.save(state_last_used, current_channel_index,
+                          getCurrentChannelInMhz(), call_sign,
+                          currentFavoritesIndex + 1);
+          }
+          else
+          {  //duplicate favorite
+            drawScreen.FavSel(currentFavoritesIndex + 1);
+            delay(800);
+            system_state = state_last_used; // return to saved function
+            force_menu_redraw = 1; // we change the state twice, must force redraw of menu
+            break;
+          }
         }
-        if (last_state == STATE_SETUP_MENU)
+        else if (last_state == STATE_SETUP_MENU)
         {
 #ifdef USE_GC9N_OSD
           OSDParams[0] = -2; //this is save
           OSDParams[1] = 0; //By default goes over manual
           SendToOSD(); //UPDATE OSD
 #endif
-          drawScreen.save(state_last_used, current_channel_index, getCurrentChannelInMhz(), call_sign, -99);
+          drawScreen.save(state_last_used, current_channel_index,
+                          getCurrentChannelInMhz(), call_sign, -99);
         }
 
-        ///LONG PRESS IN FAVORITES WILL DELETE THE CURRENT FAVORITE CHANNEL
+        // long press in favorites will delete the current favorite channel
         if  (state_last_used == STATE_FAVORITE && last_state == 255)
-        {  
+        {
 #ifdef USE_GC9N_OSD
           OSDParams[0] = -3; //this is delete
           OSDParams[1] = 0; //By default goes over manual
           SendToOSD(); //UPDATE OSD
 #endif
-          EEPROM.write(EEPROM_ADR_TUNE_FAV[lfavs], 255);
-          drawScreen.FavDelete(   getCurrentChannelInMhz(), lfavs + 1);
-          
-          for (int i = 0; i < 10; i++) {
-            temp_EEPROM_ADR_TUNE_FAV[i] = 255;    //empty temp
-          }
 
-          //--REORGANIZE FAVS  GC9n
-          int MaxFav = 0;
-          for (int i = 0; i < 10; i++)
-          {
-
-            if ( EEPROM.read(EEPROM_ADR_TUNE_FAV[i]) != 255) //not used  gc9n
-            {
-              FillTemp_Tune_fav(EEPROM.read(EEPROM_ADR_TUNE_FAV[i]));
-              MaxFav++;
+          if (currentFavoritesIndex < currentFavoritesCount)
+          {  //favorites list is not empty and index is OK
+            drawScreen.FavDelete(getCurrentChannelInMhz(),
+                                 currentFavoritesIndex + 1);
+            delay(500);
+            if (deleteCurrentFavEntry())
+            {  //list still contains entries
+              int fVal;     //get current favorite (freq or freq index)
+              if ((fVal=getEntryForFavIndex(currentFavoritesIndex)) >= 0)
+              {
+                if (fVal <= 255)
+                {  //frequency index
+                  current_channel_index = (uint8_t)fVal;
+                  current_channel_mhz = 0;
+                  channel_sort_idx = getChannelSortTableIndex(current_channel_index);
+                }
+                else  //frequency in MHz
+                  current_channel_mhz = fVal;
+                saveChannelToEEPROM();
+              }
+              drawScreen.FavSel(currentFavoritesIndex + 1);
             }
+            //drawScreen.screenSaver(diversity_mode, channelIndexToName(channelIndex), getCurrentChannelInMhz(), call_sign);
           }
-
-          for (int i = 0; i < 10; i++)
-          {
-            EEPROM.write(EEPROM_ADR_TUNE_FAV[i], temp_EEPROM_ADR_TUNE_FAV[i] );
-
-          }
-
-          //DELETED SUCCESFULLY AND GO TO FIRST FAV (IF EXISTS)
-          //drawScreen.FavReorg(MaxFav);
-          RefreshFav = false;
-           delay(1000);
-          EEPROM.write(EEPROM_ADR_TUNE_FAV_LAST, 0);
-          current_channel_index = EEPROM.read(EEPROM_ADR_TUNE_FAV[0]) ;
-          lfavs = 0;
-          current_channel_index = EEPROM.read(EEPROM_ADR_TUNE_FAV[0]) ;
-          drawScreen.FavSel(1);
-          channel_sort_idx = getChannelSortTableIndex(current_channel_index);
-          saveChannelToEEPROM();
-
-
-          //drawScreen.screenSaver(diversity_mode, channelIndexToName(channelIndex), getCurrentChannelInMhz(), call_sign);
         }
-        ///END LONG PRESS IN FAVORITES WILL DELETE THE CURRENT FAVORITE CHANNEL
+
         for (uint8_t loop = 0; loop < 5; loop++)
         {
           beep(100); // beep
           delay(100);
         }
-        delay(800);
+        delay(300);
         system_state = state_last_used; // return to saved function
         force_menu_redraw = 1; // we change the state twice, must force redraw of menu
 
@@ -769,9 +793,19 @@ void loop()
         time_screen_saver = millis();
         if (system_state != state_last_used)
         {
-          state_last_used = system_state;
           // save so state is resumed after restart
-          EEPROM.write(EEPROM_ADR_STATE, STATE_FREQ_BYMHZ);
+          EEPROM.write(EEPROM_ADR_STATE, system_state);
+
+          // return user to their saved channel after bandscan
+          if (state_last_used == STATE_SCAN || state_last_used == STATE_FAVORITE ||
+              state_last_used == STATE_MANUAL || last_state == STATE_RSSI_SETUP )
+          {
+            current_channel_index = EEPROM.read(EEPROM_ADR_CHANIDX);
+                   //set tracking equal so tune is via 'current_channel_mhz':
+            tracking_channel_index = current_channel_index;
+            current_channel_mhz = readWordFromEeprom(EEPROM_ADRW_FREQMHZ);
+          }
+          state_last_used = system_state;
         }
         break;
 
@@ -851,6 +885,7 @@ void loop()
     }
     while (digitalRead(buttonMode) == HIGH);     // wait for next button press
     system_state = state_last_used;
+    fromScreenSaverFlag = true;
 
     // if screen saver then exit 'loop()' function here
     // also exit if mode button to get to menu processing without delay
@@ -902,117 +937,92 @@ void loop()
     system_state = state_last_used;
   }
 #endif
-  if (system_state != STATE_FAVORITE)
-  {
-    RefreshFav = false;
-  }
 
   /*****************************************/
   /*   Processing FAVORITES                */
   /*****************************************/
-  if (system_state == STATE_FAVORITE ) //|| state == STATE_SEEK)
+  if (system_state == STATE_FAVORITE )
   {
-
-    // read rssi
-    wait_rssi_ready();
-    rssi_value = readRSSI();
-    rssi_best = (rssi_value > rssi_best) ? rssi_value : rssi_best;
-    time_screen_saver = millis();
-
-
-    if (!RefreshFav)
-    {
-
-      EEPROM.write(EEPROM_ADR_STATE, STATE_FAVORITE);
-      HaveFav = false;
-      for (int i = 0; i < 10; i++)
-      {
-        //NoFav
-        if (EEPROM.read(EEPROM_ADR_TUNE_FAV[i]) != 255)
-        { FirstFav = i;
-          HaveFav = true;
-
-        }
-      }
-      RefreshFav = true;
-      //channel=channel_from_index(current_channel_index); // get 0...47 index depending of current channel
-    }  // handling of keys
-
-    if ( digitalRead(buttonUp) == LOW || FS_BUTTON_DIR == 1)      // channel UP
-    {
-      delay(KEY_DEBOUNCE); // debounce
-      lfavs++;
-      if (lfavs > FirstFav) {
-        lfavs = 0;
-      }
-      current_channel_index = EEPROM.read(EEPROM_ADR_TUNE_FAV[lfavs]) ;
-      if (current_channel_index != 255)
-      {
-        drawScreen.FavSel(lfavs + 1);
-        channel_sort_idx = getChannelSortTableIndex(current_channel_index); // get 0...47 index depending of current channel
+    if (currentFavoritesCount > (uint8_t)0)
+    {  //favorites list is not empty
+      if (favModeInProgressFlag)
+      {  //did not just enter mode
+        // read rssi
+        wait_rssi_ready();
+        rssi_value = readRSSI();
         time_screen_saver = millis();
-        beep(50); // beep & debounce
-        delay(KEY_DEBOUNCE); // debounce
-        if (channel_sort_idx > CHANNEL_MAX)
-          channel_sort_idx = CHANNEL_MIN;
-        if (current_channel_index > CHANNEL_MAX_INDEX)
-          current_channel_index = CHANNEL_MIN_INDEX;
-        // drawScreen.seekMode(state);
-        saveChannelToEEPROM();
-        //Serial.println(current_channel_index);
+
+        // handling of keys
+        bool upFlag = (digitalRead(buttonUp) == LOW || FS_BUTTON_DIR == 1);    // channel UP
+        bool dnFlag = (digitalRead(buttonDown) == LOW || FS_BUTTON_DIR == 2);  // channel DOWN
+
+        if ((upFlag || dnFlag) && !(upFlag && dnFlag))
+        {  //UP or DOWN key pressed (but not both)
+          //switch to next or previous entries in favorites list
+          nextOrPrevFavEntry(upFlag);
+          time_screen_saver = millis();
+          int fVal;       //get current favorite (freq or freq index)
+          if ((fVal=getEntryForFavIndex(currentFavoritesIndex)) >= 0)
+          {
+            if (fVal <= 255)
+            {  //frequency index
+              current_channel_index = (uint8_t)fVal;
+              current_channel_mhz = 0;
+              channel_sort_idx = getChannelSortTableIndex(current_channel_index);
+            }
+            else
+            {  //frequency in MHz
+              current_channel_mhz = fVal;
+                        //set table index to nearest entry:
+              current_channel_index = freqInMhzToNearestFreqIdx(
+                                               current_channel_mhz, upFlag);
+                        //keep sort index in sync:
+              channel_sort_idx = getChannelSortTableIndex(current_channel_index);
+                        //set tracking equal so tune is via 'current_channel_mhz':
+              tracking_channel_index = current_channel_index;
+            }
+            setTunerToCurrentChannel();     //tune now so not delayed
+            saveChannelToEEPROM();
+          }
+          drawScreen.FavSel(currentFavoritesIndex + 1);
+          delay(KEY_DEBOUNCE); // debounce
+          beep(50); // beep & debounce
+          delay(KEY_DEBOUNCE); // debounce
+        }
+        system_state = STATE_SCREEN_SAVER;
       }
       else
-      {
-        lfavs--;
-      }
-    }
-
-
-    if ( digitalRead(buttonDown) == LOW || FS_BUTTON_DIR == 2) // channel DOWN
-    {
-
-      delay(KEY_DEBOUNCE); // debounce
-      lfavs--;
-      if (lfavs < 0)
-      {
-        lfavs = FirstFav;
-      }
-
-      current_channel_index = EEPROM.read(EEPROM_ADR_TUNE_FAV[lfavs]) ;
-      if (current_channel_index != 255)
-      {
-        drawScreen.FavSel(lfavs + 1);
-        channel_sort_idx = getChannelSortTableIndex(current_channel_index); // get 0...47 index depending of current channel
-        time_screen_saver = millis();
-        beep(50); // beep & debounce
-        delay(KEY_DEBOUNCE); // debounce
-
-        if (channel_sort_idx < CHANNEL_MIN)
-          channel_sort_idx = CHANNEL_MAX;
-        if (current_channel_index > CHANNEL_MAX_INDEX) // negative overflow
+      {  //mode was just entered
+        EEPROM.write(EEPROM_ADR_STATE, STATE_FAVORITE);
+        favModeInProgressFlag = true;
+        int fVal;       //get current favorite (freq or freq index)
+        if ((fVal=getEntryForFavIndex(currentFavoritesIndex)) >= 0)
         {
-          current_channel_index = CHANNEL_MAX_INDEX;
+          if (fVal <= 255)
+          {  //frequency index
+            current_channel_index = (uint8_t)fVal;
+            current_channel_mhz = 0;
+            channel_sort_idx = getChannelSortTableIndex(current_channel_index);
+          }
+          else  //frequency in MHz
+            current_channel_mhz = fVal;
+          saveChannelToEEPROM();
         }
-
-        //drawScreen.seekMode(state);
-        saveChannelToEEPROM();
-      }
-      else
-      {
-        lfavs++;
+        drawScreen.FavSel(currentFavoritesIndex + 1);
+        delay(500);
       }
     }
-
-    if (HaveFav == false)
-    { drawScreen.NoFav();
-
-    }   // IF YOU DONT HAVE FAVS
-
     else
-    {
-      //delay(KEY_DEBOUNCE); // debounce
+    {  //favorites list is empty
+      drawScreen.NoFav();
+      delay(1000);
       system_state = STATE_SCREEN_SAVER;
-    }// IF YOU HAVE FAVS
+            //revert to non-Favorties mode:
+      state_last_used = (current_channel_mhz == 0) ? STATE_MANUAL :
+                                                     STATE_FREQ_BYMHZ;
+      EEPROM.write(EEPROM_ADR_STATE, state_last_used);
+      last_state_menu_id = (state_last_used == STATE_MANUAL) ? 2 : 3;
+    }
 
 #ifdef USE_GC9N_OSD
     OSDParams[0] = 4; //this is FAV menu
@@ -1040,8 +1050,8 @@ void loop()
     bool upFlag = (digitalRead(buttonUp) == LOW || FS_BUTTON_DIR == 1);    // channel UP
     bool dnFlag = (digitalRead(buttonDown) == LOW || FS_BUTTON_DIR == 2);  // channel DOWN
 
-    if (upFlag || dnFlag)
-    {
+    if ((upFlag || dnFlag) && !(upFlag && dnFlag))
+    {  //UP or DOWN key pressed (but not both)
       time_screen_saver = millis();
 
       if (!previousUpDnButtonFlag)
@@ -1083,6 +1093,8 @@ void loop()
       // set table index to nearest entry
       current_channel_index = freqInMhzToNearestFreqIdx(
                               current_channel_mhz, upFlag);
+      // keep sort index in sync
+      channel_sort_idx = getChannelSortTableIndex(current_channel_index);
 
       // set tracking equal so tune is via 'current_channel_mhz'
       tracking_channel_index = current_channel_index;
@@ -1102,20 +1114,22 @@ void loop()
     else
       previousUpDnButtonFlag = false;
   }
-  else
-    current_channel_mhz = 0;      // tune via 'current_channel_index'
 
 
   /*****************************************/
   /*   Processing MANUAL MODE / SEEK MODE  */
   /*****************************************/
-  if (system_state == STATE_MANUAL || system_state == STATE_SEEK)
+  else if (system_state == STATE_MANUAL || system_state == STATE_SEEK)
   {
+    if (current_channel_mhz > 0)
+    {  //currently in ByMHz mode; need to tune via 'current_channel_index'
+      current_channel_mhz = 0;
+      setTunerToCurrentChannel();
+    }
     // read rssi
     wait_rssi_ready();
     rssi_value = readRSSI();
     FS_BUTTON_DIR = FSButtonDirection();
-    
     
     channel_sort_idx = getChannelSortTableIndex(current_channel_index); // get 0...47 index depending of current channel
     if (system_state == STATE_MANUAL) // MANUAL MODE
@@ -1171,22 +1185,51 @@ void loop()
     }
 
     // handling for seek mode after screen and RSSI has been fully processed
-    if (system_state == STATE_SEEK) //
+    else if (system_state == STATE_SEEK) //
     { // SEEK MODE
 
 #ifdef USE_GC9N_OSD
       OSDParams[0] = 2; //this is AUTO MODE
 #endif
 
-      // recalculate rssi_seek_threshold
-      ((int)((float)rssi_best * (float)(RSSI_SEEK_TRESHOLD / 100.0)) > rssi_seek_threshold) ? (rssi_seek_threshold = (int)((float)rssi_best * (float)(RSSI_SEEK_TRESHOLD / 100.0))) : false;
-
       if (!seek_found) // search if not found
       {
-        if ((!force_seek) && (rssi_value > rssi_seek_threshold)) // check for found channel
+        if ((!force_seek) && (rssi_value > RSSI_SEEK_TRESHOLD)) // check for found channel
         {
           seek_found = 1;
+              //check if next channels have higher RSSI
+          char chkIdx = channel_sort_idx;
+          uint8_t preChIdx = current_channel_index;
+          uint8_t chkRssiVal;
+          while (true)
+          {
+            if (seek_forward_flag)
+            {
+              if (++chkIdx > CHANNEL_MAX)
+                break;
+            }
+            else
+            {
+              if (--chkIdx < CHANNEL_MIN)
+                break;
+            }
+            current_channel_index = getChannelSortTableEntry(chkIdx);
+            setTunerToCurrentChannel();
+            wait_rssi_ready();
+            chkRssiVal = readRSSI();
+            if (chkRssiVal <= rssi_value)
+            {  //next channel does not have higher RSSI
+              current_channel_index = preChIdx;
+              setTunerToCurrentChannel();
+              break;
+            }
+              //next channel has higher RSSI; accept channel, and loop
+            channel_sort_idx = chkIdx;
+            preChIdx = current_channel_index;
+            rssi_value = chkRssiVal;
+          }
           time_screen_saver = millis();
+          chanChangedSaveFlag = true;  //channel changed and needs to be saved
           // beep twice as notice of lock
          // beep(100);
          // delay(100);
@@ -1196,39 +1239,28 @@ void loop()
         { // seeking itself
           force_seek = 0;
           // next channel
-          channel_sort_idx += seek_direction;
-          if (channel_sort_idx > CHANNEL_MAX)
+          if (seek_forward_flag)
           {
-            // calculate next pass new seek threshold
-            rssi_seek_threshold = (int)((float)rssi_best * (float)(RSSI_SEEK_TRESHOLD / 100.0));
-            channel_sort_idx = CHANNEL_MIN;
-            rssi_best = 0;
+            if (++channel_sort_idx > CHANNEL_MAX)
+              channel_sort_idx = CHANNEL_MIN;
           }
-          else if (channel_sort_idx < CHANNEL_MIN)
+          else
           {
-            // calculate next pass new seek threshold
-            rssi_seek_threshold = (int)((float)rssi_best * (float)(RSSI_SEEK_TRESHOLD / 100.0));
-            channel_sort_idx = CHANNEL_MAX;
-            rssi_best = 0;
+            if (--channel_sort_idx < CHANNEL_MIN)
+              channel_sort_idx = CHANNEL_MAX;
           }
-          rssi_seek_threshold = rssi_seek_threshold < 5 ? 5 : rssi_seek_threshold; // make sure we are not stopping on everyting
           current_channel_index = getChannelSortTableEntry(channel_sort_idx);
         }
       }
-      else
-      { // seek was successful
+      // else  //seek was successful
 
-      }
-      FS_BUTTON_DIR = FSButtonDirection();
-      if (digitalRead(buttonUp) == LOW || digitalRead(buttonDown) == LOW || FS_BUTTON_DIR == 2 || FS_BUTTON_DIR == 1) // restart seek if key pressed
-      {
-        if (digitalRead(buttonUp) == LOW  || FS_BUTTON_DIR == 1 ) {
-          seek_direction = 1;
-        }
-        else
-        {
-          seek_direction = -1;
-        }
+      // handling of keys
+      bool upFlag = (digitalRead(buttonUp) == LOW || FS_BUTTON_DIR == 1);    // channel UP
+      bool dnFlag = (digitalRead(buttonDown) == LOW || FS_BUTTON_DIR == 2);  // channel DOWN
+
+      if ((upFlag || dnFlag) && !(upFlag && dnFlag))
+      {  //UP or DOWN key pressed (but not both); restart seek
+        seek_forward_flag = upFlag;
         beep(50); // beep & debounce
         FS_BUTTON_DIR = 0;
         delay(KEY_DEBOUNCE); // debounce
@@ -1243,7 +1275,8 @@ void loop()
     }
     // change to screensaver after lock and 5 seconds has passed.
     if (((time_screen_saver + 5000 < millis()) && (time_screen_saver != 0) && (rssi_value > 50)) ||
-        ((time_screen_saver != 0 && time_screen_saver + (SCREENSAVER_TIMEOUT * 1000) < millis()))) {
+        ((time_screen_saver != 0 && time_screen_saver + (SCREENSAVER_TIMEOUT * 1000) < millis())))
+    {
       system_state = STATE_SCREEN_SAVER;
 #ifdef USE_GC9N_OSD
       OSDParams[0] = -99; // CLEAR OSD
@@ -1254,13 +1287,15 @@ void loop()
     //teza
     if (last_channel_index != current_channel_index || stateManualInitFlag)
     {
-      drawScreen.updateSeekMode(system_state, current_channel_index, channel_sort_idx, rssi_value, getCurrentChannelInMhz(), rssi_seek_threshold, seek_found);
+      drawScreen.updateSeekMode(system_state, current_channel_index, channel_sort_idx, rssi_value, getCurrentChannelInMhz(), RSSI_SEEK_TRESHOLD, seek_found);
 #ifdef USE_GC9N_OSD
       OSDParams[1] = getCurrentChannelInMhz();
       SendToOSD(); //UPDATE OSD
 #endif
       stateManualInitFlag = false;
     }
+
+    fromScreenSaverFlag = false;
   }
 
   /****************************/
@@ -1277,6 +1312,7 @@ void loop()
     if (scan_start)
     {
       scan_start = 0;
+      current_channel_mhz = 0;      // tune via 'current_channel_index'
       setChannelByIdx(current_channel_index);
       last_channel_index = current_channel_index;
     }
@@ -1285,16 +1321,6 @@ void loop()
     wait_rssi_ready();
     // value must be ready
     rssi_value = readRSSI();
-
-    if (system_state == STATE_SCAN)
-    {
-      if (rssi_value > RSSI_SEEK_TRESHOLD)
-      {
-        if (rssi_best < rssi_value) {
-          rssi_best = rssi_value;
-        }
-      }
-    }
 
     uint16_t bestChannelName = channelIndexToName(current_channel_index);
     uint16_t bestChannelFrequency = getCurrentChannelInMhz();
@@ -1312,30 +1338,29 @@ void loop()
       if (system_state == STATE_RSSI_SETUP)
       {
         if (!rssi_setup_run--)
-        {
-          // setup done
+        {  // setup done
           rssi_min_a = rssi_setup_min_a;
-          rssi_max_a = rssi_setup_max_a;
-          if (rssi_max_a < 125) { // user probably did not turn on the VTX during calibration
-            rssi_max_a = RSSI_MAX_VAL;
+          writeWordToEeprom(EEPROM_ADRW_RSSI_MIN_A, rssi_min_a);
+              //if 'max' is close to 'min' then user probably
+              // did not turn on the VTX during calibration
+          if (rssi_setup_max_a - rssi_setup_min_a >= rssi_setup_min_a/3)
+          {  //difference is high enough to use
+            rssi_max_a = rssi_setup_max_a;
+            writeWordToEeprom(EEPROM_ADRW_RSSI_MAX_A, rssi_max_a);
           }
-          // save 16 bit
-          EEPROM_WRITE_WORD(EEPROM_ADRW_RSSI_MIN_A, rssi_min_a);
-          // save 16 bit
-          EEPROM_WRITE_WORD(EEPROM_ADRW_RSSI_MAX_A, rssi_max_a);
 
 #ifdef USE_DIVERSITY
-
-          if (isDiversity()) { // only calibrate RSSI B when diversity is detected.
+          if (isDiversity())
+          {  // only calibrate RSSI B when diversity is detected.
             rssi_min_b = rssi_setup_min_b;
-            rssi_max_b = rssi_setup_max_b;
-            if (rssi_max_b < 125) { // user probably did not turn on the VTX during calibration
-              rssi_max_b = RSSI_MAX_VAL;
+            writeWordToEeprom(EEPROM_ADRW_RSSI_MIN_B, rssi_min_b);
+              //if 'max' is close to 'min' then user probably
+              // did not turn on the VTX during calibration
+            if (rssi_setup_max_b - rssi_setup_min_b >= rssi_setup_min_b/3)
+            {  //difference is high enough to use
+              rssi_max_b = rssi_setup_max_b;
+              writeWordToEeprom(EEPROM_ADRW_RSSI_MAX_B, rssi_max_b);
             }
-            // save 16 bit
-            EEPROM_WRITE_WORD(EEPROM_ADRW_RSSI_MIN_B, rssi_min_b);
-            // save 16 bit
-            EEPROM_WRITE_WORD(EEPROM_ADRW_RSSI_MAX_B, rssi_max_b);
           }
 #endif
           system_state = EEPROM.read(EEPROM_ADR_STATE);
@@ -1352,7 +1377,6 @@ void loop()
       last_state = 255; // force redraw by fake state change ;-)
       channel_sort_idx = CHANNEL_MIN;
       scan_start = 1;
-      rssi_best = 0;
       FS_BUTTON_DIR = 0;
 
     }
@@ -1551,7 +1575,7 @@ void saveChannelToEEPROM()
   if (current_channel_mhz != lastSavedMHzVal)
   {
     lastSavedMHzVal = current_channel_mhz;
-    EEPROM_WRITE_WORD(EEPROM_ADRW_FREQMHZ, current_channel_mhz);
+    writeWordToEeprom(EEPROM_ADRW_FREQMHZ, current_channel_mhz);
   }
 }
 
@@ -1566,18 +1590,172 @@ void beep(uint16_t time)
   digitalWrite(buzzer, HIGH);
 }
 
-void FillTemp_Tune_fav(int FavChannelx)
-{
-  for (int i = 0; i < 10; i++)
-  {
-    if ( temp_EEPROM_ADR_TUNE_FAV[i] == 255 && FavChannelx != 255) //not used  gc9n
-    {
-      temp_EEPROM_ADR_TUNE_FAV[i] = FavChannelx;
-      i = 12;
-    }
 
+//Initializes the 'currentFavoritesCount' and 'currentFavoritesIndex'
+// variables.
+void initializeFavorites()
+{
+  uint16_t wordVal;
+  uint8_t btIdx = 0;
+  do
+  {           // find first unused slot
+    wordVal = readWordFromEeprom(EEPROM_ADRA_FAVLIST + (btIdx*(uint16_t)2));
+    if (!IS_FAVENTRY_VALID(wordVal))
+      break;
+  }
+  while (++btIdx < FAV_NUMBER_OF_SLOTS);
+  currentFavoritesCount = btIdx;
+  if (currentFavoritesCount > (uint8_t)0)
+  {
+    currentFavoritesIndex = EEPROM.read(EEPROM_ADR_LAST_FAVIDX);
+    if (currentFavoritesIndex >= currentFavoritesCount)
+      currentFavoritesIndex = 0;
   }
 }
+
+
+//Adds the given frequency index or MHz value to the favorites list.
+// Returns true if added; false if duplicate of existing favorite.
+bool addFreqOrIdxToFavs(uint16_t fVal)
+{
+  int idx;
+
+  // check if matches existing entry
+  if ((idx=getFavIndexForFreqOrIdx(fVal)) >= 0)
+  {  //match found; select as current favorite
+    currentFavoritesIndex = (uint8_t)idx;
+    EEPROM.write(EEPROM_ADR_LAST_FAVIDX, currentFavoritesIndex);
+    return false;
+  }
+
+  // search for next unused favorites slot
+  uint16_t wordVal;
+  uint8_t btIdx;
+  idx = 0;
+  while (true)
+  {
+    wordVal = readWordFromEeprom(EEPROM_ADRA_FAVLIST + (idx*2));
+    if (!IS_FAVENTRY_VALID(wordVal))
+    {  //unused slot found; use it
+      btIdx = (uint8_t)idx;
+      ++currentFavoritesCount;         //keep track of favs count
+      break;
+    }
+    if (++idx >= FAV_NUMBER_OF_SLOTS)
+    {  //no unused slots found; reuse next slot after current favorite
+      btIdx = currentFavoritesIndex;
+      if (++btIdx >= FAV_NUMBER_OF_SLOTS)
+        btIdx = 0;
+      break;
+    }
+  }
+
+  // enter given value into favorites slot
+  writeWordToEeprom(EEPROM_ADRA_FAVLIST + (btIdx*(uint16_t)2), fVal);
+  currentFavoritesIndex = btIdx;
+  EEPROM.write(EEPROM_ADR_LAST_FAVIDX, btIdx);
+  return true;
+}
+
+
+//Deletes the current favorite from the list.  Entries after the deleted
+// entry are shifted down.
+// Returns true if the favorites list still contains entries; false if
+//  the list is now empty.
+boolean deleteCurrentFavEntry()
+{
+  uint8_t btIdx = currentFavoritesIndex;
+  if (btIdx < FAV_NUMBER_OF_SLOTS)
+  {
+    // scan entries after the one to be deleted
+    uint16_t wordVal;
+    uint16_t idx = btIdx;
+    while(++idx < FAV_NUMBER_OF_SLOTS)
+    {
+      wordVal = readWordFromEeprom(EEPROM_ADRA_FAVLIST + (idx*2));
+      if (IS_FAVENTRY_VALID(wordVal))
+      {  //slot not empty; shift value down one
+        writeWordToEeprom(EEPROM_ADRA_FAVLIST + ((idx-1)*2), wordVal);
+      }
+      else
+        break;
+    }
+    --idx;
+    // clear last slot that contained a value
+    writeWordToEeprom(EEPROM_ADRA_FAVLIST + (idx*2), (uint16_t)0xFFFF);
+    currentFavoritesCount = (uint8_t)idx;   //keep track of favs count
+
+    // if last used slot was deleted then update current favorite index
+    if (btIdx == idx)
+    {
+      if (btIdx == 0)
+      {  //was on first slot; list is now empty
+        currentFavoritesCount = 0;
+        currentFavoritesIndex = 0;
+        EEPROM.write(EEPROM_ADR_LAST_FAVIDX, currentFavoritesIndex);
+        return false;
+      }
+      --btIdx;
+      currentFavoritesIndex = btIdx;
+      EEPROM.write(EEPROM_ADR_LAST_FAVIDX, btIdx);
+    }
+  }
+  return true;
+}
+
+
+//Returns the frequency-index or frequency-in-MHz value for the favorites
+// entry for the given favorites index.
+int getEntryForFavIndex(uint8_t fIdx)
+{
+  if (fIdx < currentFavoritesCount)
+  {
+    uint16_t wordVal = readWordFromEeprom(
+                                  EEPROM_ADRA_FAVLIST + (fIdx*(uint16_t)2));
+    if (IS_FAVENTRY_VALID(wordVal))
+      return (int)wordVal;
+  }
+  return -1;
+}
+
+
+//Switches the current favorite to the next or previous entry
+// in the list.
+void nextOrPrevFavEntry(boolean nextFlag)
+{
+  // if less than two entries in list then just return
+  if (currentFavoritesCount < (uint8_t)2)
+    return;
+  uint8_t btIdx = currentFavoritesIndex;
+  if (nextFlag)
+  {  //next
+    if (++btIdx >= currentFavoritesCount)
+      btIdx = 0;
+  }
+  else
+  {  //previous
+    if (btIdx > (uint8_t)0)
+      --btIdx;
+    else
+      btIdx = currentFavoritesCount - (uint8_t)1;
+  }
+  currentFavoritesIndex = btIdx;
+  EEPROM.write(EEPROM_ADR_LAST_FAVIDX, currentFavoritesIndex);
+}
+
+
+//Returns the index for the favorites slot matching the given frequency
+// index or MHz value, or -1 if no match.
+int getFavIndexForFreqOrIdx(uint16_t fVal)
+{
+  for (int idx=0; idx<currentFavoritesCount; ++idx)
+  {
+    if (readWordFromEeprom(EEPROM_ADRA_FAVLIST+(idx*2)) == fVal)
+      return idx;
+  }
+  return -1;
+}
+
 
 #ifdef USE_GC9N_OSD
 void SendToOSD() //GC9N
@@ -1657,4 +1835,20 @@ int8_t FSButtonDirection () //gc9n
     }
   }
   return 0;
+}
+
+
+//Writes 2-byte word to EEPROM at address.
+void writeWordToEeprom(int addr, uint16_t val)
+{
+  EEPROM.write(addr, lowByte(val));
+  EEPROM.write(addr+1, highByte(val));
+}
+
+//Reads 2-byte word at address from EEPROM.
+uint16_t readWordFromEeprom(int addr)
+{
+  const uint8_t lb = EEPROM.read(addr);
+  const uint8_t hb = EEPROM.read(addr+1);
+  return (((uint16_t)hb) << 8) + lb;
 }

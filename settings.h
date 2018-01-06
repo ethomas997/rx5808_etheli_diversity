@@ -23,7 +23,7 @@ SOFTWARE.
 #ifndef settings_h
 #define settings_h
 
-#define PROG_REVISION_STR "RX5808 v0.01"
+#define PROG_REVISION_STR "RX5808 v0.11"
 
 // #define Debug
 
@@ -114,9 +114,9 @@ SOFTWARE.
 #define RSSI_MIN_VAL 90
 #define RSSI_MAX_VAL 220
 // 75% threshold, when channel is printed in spectrum
-#define RSSI_SEEK_FOUND 75
-// 80% under max value for RSSI
-#define RSSI_SEEK_TRESHOLD 80
+#define RSSI_SEEK_FOUND 50
+// RSSI value for channel found during auto-seek
+#define RSSI_SEEK_TRESHOLD 60
 // scan loops for setup run
 #define RSSI_SETUP_RUN 3
 
