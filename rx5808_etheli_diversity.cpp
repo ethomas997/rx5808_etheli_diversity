@@ -82,12 +82,12 @@ screens drawScreen;
 #define EEPROM_ADR_BEEP 11
 #define EEPROM_ADR_ORDERBY 12
 #define EEPROM_ADR_OSD 14
-#define EEPROM_ADRW_FREQMHZ 16
+#define EEPROM_ADRW_FREQMHZ 16         // current freq in MHz, or 0 if chanIdx instead
 #define EEPROM_ADRW_CHECKWORD 18       // integrity-check value for EEPROM
 #define EEPROM_ADR_CALLSIGN 20
 #define EEPROM_ADR_LAST_FAVIDX 60      // index of last favorite used
 
-//address for favs list in EEPROM (array of 2-byte words)
+// address for favs list in EEPROM (array of 2-byte words)
 #define EEPROM_ADRA_FAVLIST 64
 #define FAV_NUMBER_OF_SLOTS 10         // number of favorite channels
 
@@ -95,7 +95,8 @@ screens drawScreen;
 
 #define EEPROM_CHECK_VALUE 0x2719      // EEPROM integrity-check value
 
-#define IS_FAVENTRY_VALID(val) (((val) <= CHANNEL_MAX_INDEX ||\
+// returns true if valid channel index or frequency-in-MHz value
+#define IS_FAVENTRY_VALID(val) (((uint16_t)(val) <= CHANNEL_MAX_INDEX ||\
                     ((val) >= MIN_CHANNEL_MHZ && (val) <= MAX_CHANNEL_MHZ)))
 
 
@@ -121,7 +122,7 @@ int getFavIndexForFreqOrIdx(uint16_t fVal);
 #ifdef USE_GC9N_OSD
 void SendToOSD();
 #endif
-int8_t FSButtonDirection();
+int8_t fsButtonDirection();
 void writeWordToEeprom(int addr, uint16_t val);
 uint16_t readWordFromEeprom(int addr);
 
@@ -181,8 +182,9 @@ static uint8_t force_seek = 0;
 static bool seek_forward_flag = true;
 static unsigned long time_screen_saver = 0;
 static uint8_t seek_found = 0;
+static uint8_t last_seek_rssi = 0;
 static uint8_t scan_start = 0;
-static bool stateManualInitFlag = false;
+static bool updateSeekScreenFlag = false;
 static uint8_t play_startup_beeps = 1;
 
 static char call_sign[CALL_SIGN_SIZE];
@@ -294,6 +296,7 @@ void setup()
       current_channel_mhz > MAX_CHANNEL_MHZ)
   {
     current_channel_mhz = 0;
+    writeWordToEeprom(EEPROM_ADRW_FREQMHZ, 0);
   }
 
   // set the channel as soon as we can for faster boot up times
@@ -397,7 +400,7 @@ void loop()
     // reset flag so favorites mode will "restart"
     favModeInProgressFlag = false;
 
-    in_menu = 1;
+    in_menu = 0;
     in_menu_time_out = 50; // 20x 100ms = 5 seconds
     /*
       Enter Mode menu
@@ -430,13 +433,16 @@ void loop()
         saveChannelToEEPROM();
       }
 
-      // if press while manual-mode showing then jump to screen saver
-      if (system_state == STATE_MANUAL && !fromScreenSaverFlag)
-      {
-        in_menu = 0;
-        system_state = STATE_SCREEN_SAVER;
-        fromScreenSaverFlag = true;
-        break;
+      if (!in_menu)
+      {  //first time through in-menu loop
+              //if press while manual-mode showing then jump to screen saver:
+        if (system_state == STATE_MANUAL && !fromScreenSaverFlag)
+        {
+          system_state = STATE_SCREEN_SAVER;
+          fromScreenSaverFlag = true;
+          break;
+        }
+        in_menu = 1;    //set flag to continue in-menu loop
       }
 
       switch (menu_id)
@@ -444,8 +450,6 @@ void loop()
         case 0: // AUTO MODE
           system_state = STATE_SEEK;
           tracked_menu_id = menu_id;
-          force_seek = 1;
-          seek_found = 0;
           break;
         case 1: // Band Scanner
           system_state = STATE_SCAN;
@@ -500,16 +504,14 @@ void loop()
       else
       {
         drawScreen.mainMenu(menu_id);
-
       }
 
-
-      while (digitalRead(buttonMode) == LOW || digitalRead(buttonUp) == LOW || digitalRead(buttonDown) == LOW  || FSButtonDirection() == 1 || FSButtonDirection() == 2)
+      while (digitalRead(buttonMode) == LOW || digitalRead(buttonUp) == LOW || digitalRead(buttonDown) == LOW  || fsButtonDirection() == 1 || fsButtonDirection() == 2)
       {
         // wait for MODE release
         in_menu_time_out = 50;
       }
-      while (--in_menu_time_out && ((digitalRead(buttonMode) == HIGH) && (digitalRead(buttonUp) == HIGH) && (digitalRead(buttonDown) == HIGH) &&  FSButtonDirection() == 0  )) // wait for next key press or time out
+      while (--in_menu_time_out && ((digitalRead(buttonMode) == HIGH) && (digitalRead(buttonUp) == HIGH) && (digitalRead(buttonDown) == HIGH) &&  fsButtonDirection() == 0  )) // wait for next key press or time out
       {
         delay(100); // timeout delay
       }
@@ -535,7 +537,6 @@ void loop()
         }
         else
         {
-
           // Serial.read();
           if (digitalRead(buttonMode) != LOW)
           {  //button not pressed; timeout
@@ -548,7 +549,19 @@ void loop()
             }
           }
           else  //button pressed; set id for item to be selected when menu resumed
+          {
             last_state_menu_id = tracked_menu_id;
+                   //if auto/seek menu item selected then always start new seek
+                   // (but if timeout then will depend on 'seek_found')
+            if (system_state == STATE_SEEK)
+            {
+              force_seek = 1;
+              if (seek_found)
+                seek_found = 0;
+              else  //if "new" seek then init 'last-rssi' value
+                last_seek_rssi = 0;
+            }
+          }
           in_menu = 0; // EXIT
           beep(KEY_DEBOUNCE / 2); // beep & debounce
           delay(50); // debounce
@@ -658,27 +671,30 @@ void loop()
         if (system_state == STATE_MANUAL)
         {
           time_screen_saver = millis();
-          stateManualInitFlag = true;       //indicate just entered state
           if (system_state != state_last_used)
           {
             // save so state is resumed after restart
             EEPROM.write(EEPROM_ADR_STATE, system_state);
           }
+              //if coming from scan or seek mode then restore previous channel:
+          if (state_last_used == STATE_SCAN || state_last_used == STATE_SEEK ||
+              last_state == STATE_RSSI_SETUP)
+          {
+            current_channel_index = EEPROM.read(EEPROM_ADR_CHANIDX);
+            channel_sort_idx = getChannelSortTableIndex(current_channel_index);
+            current_channel_mhz = 0;
+          }
+          else if (state_last_used == STATE_FREQ_BYMHZ)
+          {     //if previous mode was BY-MHZ then tune now via channel index
+            current_channel_mhz = 0;
+          }
         }
         else //if (system_state == STATE_SEEK)
         {
-          force_seek = 1;
           time_screen_saver = 0; // dont show screen saver until we found a channel.
-          stateManualInitFlag = false;
         }
-        drawScreen.seekMode(system_state);
-
-        // return user to their saved channel after bandscan
-        if (state_last_used == STATE_SCAN || state_last_used == STATE_FAVORITE ||
-            state_last_used == STATE_FREQ_BYMHZ || last_state == STATE_RSSI_SETUP )
-        {
-          current_channel_index = EEPROM.read(EEPROM_ADR_CHANIDX);
-        }
+        drawScreen.seekMode(system_state);  //draw initial manual/seek screen
+        updateSeekScreenFlag = true;        //update screen when entering mode
         state_last_used = system_state;
         break;
 #ifdef USE_DIVERSITY
@@ -796,9 +812,9 @@ void loop()
           // save so state is resumed after restart
           EEPROM.write(EEPROM_ADR_STATE, system_state);
 
-          // return user to their saved channel after bandscan
-          if (state_last_used == STATE_SCAN || state_last_used == STATE_FAVORITE ||
-              state_last_used == STATE_MANUAL || last_state == STATE_RSSI_SETUP )
+          // if coming from scan or seek mode then restore previous channel
+          if (state_last_used == STATE_SCAN || state_last_used == STATE_SEEK ||
+              last_state == STATE_RSSI_SETUP)
           {
             current_channel_index = EEPROM.read(EEPROM_ADR_CHANIDX);
                    //set tracking equal so tune is via 'current_channel_mhz':
@@ -826,7 +842,6 @@ void loop()
     beep(UP_BEEP);
   }
 
-  uint8_t rssi_value;
 
   /*************************************/
   /*   Processing depending of state   */
@@ -851,7 +866,7 @@ void loop()
     time_screen_saver = millis();
     do
     {
-      rssi_value = readRSSI();
+      uint8_t rssi_value = readRSSI();
 
       if (chanChangedSaveFlag && time_screen_saver + 1000 < millis())
       {  //unsaved channel change and enough time elapsed
@@ -899,7 +914,7 @@ void loop()
   {
     // simple menu
     char menu_id = diversity_mode;
-    uint8_t in_menu = 1;
+    uint8_t in_div_menu = 1;
     do
     {
       diversity_mode = menu_id;
@@ -910,11 +925,11 @@ void loop()
         readRSSI();
         drawScreen.updateDiversity(active_receiver, readRSSI(useReceiverA), readRSSI(useReceiverB));
       }
-      while ((digitalRead(buttonMode) == HIGH) && (digitalRead(buttonUp) == HIGH) && (digitalRead(buttonDown) == HIGH) &&  FSButtonDirection() == 0 ); // wait for next mode or time out
+      while ((digitalRead(buttonMode) == HIGH) && (digitalRead(buttonUp) == HIGH) && (digitalRead(buttonDown) == HIGH) &&  fsButtonDirection() == 0 ); // wait for next mode or time out
 
       if (digitalRead(buttonMode) == LOW)       // channel UP
       {
-        in_menu = 0; // exit menu
+        in_div_menu = 0; // exit menu
       }
       else if (digitalRead(buttonUp) == LOW || FS_BUTTON_DIR == 1) {
         menu_id--;
@@ -932,7 +947,7 @@ void loop()
       beep(50); // beep & debounce
       delay(KEY_DEBOUNCE); // debounce
     }
-    while (in_menu);
+    while (in_div_menu);
 
     system_state = state_last_used;
   }
@@ -949,7 +964,7 @@ void loop()
       {  //did not just enter mode
         // read rssi
         wait_rssi_ready();
-        rssi_value = readRSSI();
+        uint8_t rssi_value = readRSSI();
         time_screen_saver = millis();
 
         // handling of keys
@@ -995,8 +1010,18 @@ void loop()
       {  //mode was just entered
         EEPROM.write(EEPROM_ADR_STATE, STATE_FAVORITE);
         favModeInProgressFlag = true;
-        int fVal;       //get current favorite (freq or freq index)
-        if ((fVal=getEntryForFavIndex(currentFavoritesIndex)) >= 0)
+              //get current channel index or frequency in MHz value:
+        int fVal = (current_channel_mhz == 0) ?
+                               current_channel_index : current_channel_mhz;
+              //if current chan/freq matches an existing favorite then
+              // use that favorite; otherwise use current/last favorite:
+        int idx;
+        if ((idx=getFavIndexForFreqOrIdx(fVal)) >= 0)
+          currentFavoritesIndex = idx;
+        else
+          fVal = getEntryForFavIndex(currentFavoritesIndex);
+              //set variables to tune to favorite:
+        if (fVal >= 0)
         {
           if (fVal <= 255)
           {  //frequency index
@@ -1008,6 +1033,7 @@ void loop()
             current_channel_mhz = fVal;
           saveChannelToEEPROM();
         }
+              //show favorite ID value to user:
         drawScreen.FavSel(currentFavoritesIndex + 1);
         delay(500);
       }
@@ -1017,7 +1043,7 @@ void loop()
       drawScreen.NoFav();
       delay(1000);
       system_state = STATE_SCREEN_SAVER;
-            //revert to non-Favorties mode:
+            //revert to non-Favorites mode:
       state_last_used = (current_channel_mhz == 0) ? STATE_MANUAL :
                                                      STATE_FREQ_BYMHZ;
       EEPROM.write(EEPROM_ADR_STATE, state_last_used);
@@ -1125,11 +1151,12 @@ void loop()
     {  //currently in ByMHz mode; need to tune via 'current_channel_index'
       current_channel_mhz = 0;
       setTunerToCurrentChannel();
+      chanChangedSaveFlag = true;      //channel changed and needs to be saved
     }
     // read rssi
     wait_rssi_ready();
-    rssi_value = readRSSI();
-    FS_BUTTON_DIR = FSButtonDirection();
+    uint8_t rssi_value = readRSSI();
+    FS_BUTTON_DIR = fsButtonDirection();
     
     channel_sort_idx = getChannelSortTableIndex(current_channel_index); // get 0...47 index depending of current channel
     if (system_state == STATE_MANUAL) // MANUAL MODE
@@ -1194,7 +1221,10 @@ void loop()
 
       if (!seek_found) // search if not found
       {
-        if ((!force_seek) && (rssi_value > RSSI_SEEK_TRESHOLD)) // check for found channel
+        // if seek was not just initiated then check if RSSI level is high
+        //  enough for 'found' channel (and beyond previous 'found' channel)
+        if ((!force_seek) && rssi_value > RSSI_SEEK_TRESHOLD &&
+                                       last_seek_rssi <= RSSI_SEEK_TRESHOLD)
         {
           seek_found = 1;
               //check if next channels have higher RSSI
@@ -1227,6 +1257,7 @@ void loop()
             channel_sort_idx = chkIdx;
             preChIdx = current_channel_index;
             rssi_value = chkRssiVal;
+            updateSeekScreenFlag = true;    //update channel shown on screen
           }
           time_screen_saver = millis();
           chanChangedSaveFlag = true;  //channel changed and needs to be saved
@@ -1269,13 +1300,17 @@ void loop()
         time_screen_saver = 0;
       }
 
+      last_seek_rssi = rssi_value;
+
 #ifdef USE_GC9N_OSD
       SendToOSD(); //UPDATE OSD
 #endif
     }
+
     // change to screensaver after lock and 5 seconds has passed.
-    if (((time_screen_saver + 5000 < millis()) && (time_screen_saver != 0) && (rssi_value > 50)) ||
-        ((time_screen_saver != 0 && time_screen_saver + (SCREENSAVER_TIMEOUT * 1000) < millis())))
+    if (time_screen_saver != 0 &&
+        ((time_screen_saver + 5000 < millis() && rssi_value > 50) ||
+        time_screen_saver + (SCREENSAVER_TIMEOUT * 1000) < millis()))
     {
       system_state = STATE_SCREEN_SAVER;
 #ifdef USE_GC9N_OSD
@@ -1285,14 +1320,16 @@ void loop()
     }
   
     //teza
-    if (last_channel_index != current_channel_index || stateManualInitFlag)
+    if (last_channel_index != current_channel_index || updateSeekScreenFlag)
     {
       drawScreen.updateSeekMode(system_state, current_channel_index, channel_sort_idx, rssi_value, getCurrentChannelInMhz(), RSSI_SEEK_TRESHOLD, seek_found);
 #ifdef USE_GC9N_OSD
       OSDParams[1] = getCurrentChannelInMhz();
       SendToOSD(); //UPDATE OSD
 #endif
-      stateManualInitFlag = false;
+      updateSeekScreenFlag = false;
+      if (seek_found)                  //cover case where seek screen restored
+        time_screen_saver = millis();  // after fav save; setup timeout
     }
 
     fromScreenSaverFlag = false;
@@ -1320,12 +1357,12 @@ void loop()
     // print bar for spectrum
     wait_rssi_ready();
     // value must be ready
-    rssi_value = readRSSI();
+    uint8_t rssi_value = readRSSI();
 
-    uint16_t bestChannelName = channelIndexToName(current_channel_index);
-    uint16_t bestChannelFrequency = getCurrentChannelInMhz();
+    uint16_t scanChannelName = channelIndexToName(current_channel_index);
+    uint16_t scanChannelFrequency = getCurrentChannelInMhz();
 
-    drawScreen.updateBandScanMode((system_state == STATE_RSSI_SETUP), channel_sort_idx, rssi_value, bestChannelName, bestChannelFrequency, rssi_setup_min_a, rssi_setup_max_a);
+    drawScreen.updateBandScanMode((system_state == STATE_RSSI_SETUP), channel_sort_idx, rssi_value, scanChannelName, scanChannelFrequency, rssi_setup_min_a, rssi_setup_max_a);
 
     // next channel
     if (channel_sort_idx < CHANNEL_MAX)
@@ -1369,7 +1406,7 @@ void loop()
       }
     }
     // new scan possible by press scan
-    FS_BUTTON_DIR = FSButtonDirection();
+    FS_BUTTON_DIR = fsButtonDirection();
     if (digitalRead(buttonUp) == LOW ||  FS_BUTTON_DIR == 1) // force new full new scan
     {
       beep(50); // beep & debounce
@@ -1402,7 +1439,7 @@ void loop()
     do {
       in_menu_time_out = 50;
       drawScreen.updateSetupMenu(menu_id, settings_beeps, settings_orderby_channel, call_sign, editing);
-      while (--in_menu_time_out && ((digitalRead(buttonMode) == HIGH) && (digitalRead(buttonUp) == HIGH) && (digitalRead(buttonDown) == HIGH)  && FSButtonDirection() == 0)) // wait for next key press or time out
+      while (--in_menu_time_out && ((digitalRead(buttonMode) == HIGH) && (digitalRead(buttonUp) == HIGH) && (digitalRead(buttonDown) == HIGH)  && fsButtonDirection() == 0)) // wait for next key press or time out
       {
         delay(100); // timeout delay
       }
@@ -1485,7 +1522,7 @@ void loop()
         delay(150);// wait for button release
 
       }
-      while (editing == -1 && (digitalRead(buttonMode) == LOW || digitalRead(buttonUp) == LOW || digitalRead(buttonDown) == LOW || FSButtonDirection() == 1 || FSButtonDirection() == 2));
+      while (editing == -1 && (digitalRead(buttonMode) == LOW || digitalRead(buttonUp) == LOW || digitalRead(buttonDown) == LOW || fsButtonDirection() == 1 || fsButtonDirection() == 2));
     }
     while (in_menu);
   }
@@ -1511,7 +1548,6 @@ void setTunerToCurrentChannel()
         current_channel_mhz > 0)
     {  //tune is by freq in MHz
       setChannelByFreq(current_channel_mhz);
-      last_channel_mhz = current_channel_mhz;
     }
     else
     {  //tune is by freq index (band/channel)
@@ -1520,6 +1556,7 @@ void setTunerToCurrentChannel()
       current_channel_mhz = 0;
     }
     last_channel_index = current_channel_index;
+    last_channel_mhz = current_channel_mhz;
 
     // keep time of tune to make sure that RSSI is stable when required
     set_time_of_tune();
@@ -1811,7 +1848,7 @@ void SendToOSD() //GC9N
 }
 #endif
 
-int8_t FSButtonDirection () //gc9n
+int8_t fsButtonDirection () //gc9n
 {
   char dir; //1 UP 2 DOWN
   while ( Serial.available() > 0) {

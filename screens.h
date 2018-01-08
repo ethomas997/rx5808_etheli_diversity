@@ -41,6 +41,8 @@ class screens
         uint8_t last_rssi;
         uint8_t best_rssi;
         uint8_t last_channel;
+        uint16_t bestChannelName;
+        uint16_t bestChannelFrequency;
         void reset();
         void drawTitleBox(const char *title, bool centerFlag = true);
 

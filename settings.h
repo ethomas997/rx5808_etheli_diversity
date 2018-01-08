@@ -23,7 +23,7 @@ SOFTWARE.
 #ifndef settings_h
 #define settings_h
 
-#define PROG_REVISION_STR "RX5808 v0.11"
+#define PROG_REVISION_STR "RX5808 v0.50"
 
 // #define Debug
 
@@ -44,7 +44,7 @@ SOFTWARE.
 #define CALL_SIGN "_"
 
 
-// Feature Togglels
+// Feature Toggles
 #define USE_DIVERSITY
 
 // uncomment to enable OSD support by GC9N
@@ -81,16 +81,16 @@ SOFTWARE.
     #define rssiPinB A7
     #define useReceiverAuto 0
     #define useReceiverB 2   
-    // rssi strenth should be 2% greater than other receiver before switch.
-    // this pervents flicker when rssi values are close and delays diversity checks counter.
+    // rssi strength should be 2% greater than other receiver before switch.
+    // this prevents flicker when rssi values are close and delays diversity checks counter.
     
     #define DIVERSITY_CUTOVER 4 // changing this to 4% to try making it smoother
 
     // Original comments number of checks a receiver needs to win over the other to switch receivers.
-    // this pervents rapid switching.
+    // this prevents rapid switching.
 
     // 1 to 10 is a good range. 1 being fast switching, 10 being slow 100ms to switch.
-    #define DIVERSITY_MAX_CHECKS 7 //chaging this to 7 try making it smoother eliminate sync problems.
+    #define DIVERSITY_MAX_CHECKS 7 //changing this to 7 try making it smoother eliminate sync problems.
 #endif
 
 // this two are minimum required
@@ -152,7 +152,8 @@ SOFTWARE.
 #ifdef rx5808
     // rx5808 module need >20ms to tune.
     // 25 ms will do a 40 channel scan in 1 second.
-    #define MIN_TUNE_TIME 25
+    // 35 ms will do a 40 channel scan in 1.4 seconds.
+    #define MIN_TUNE_TIME 35
 #endif
 #ifdef rx5880
     // rx5880 module needs >30ms to tune.

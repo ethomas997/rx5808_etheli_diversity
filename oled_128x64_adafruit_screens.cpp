@@ -71,6 +71,8 @@ screens::screens()
   last_channel = -1;
   last_rssi = 0;
   best_rssi = 0;
+  bestChannelName = 0;
+  bestChannelFrequency = 0;
 }
  
 char screens::begin(const char *call_sign)
@@ -408,8 +410,10 @@ void screens::updateSeekMode(uint8_t state, uint8_t channelIndex, uint8_t channe
  
 void screens::bandScanMode(uint8_t state)
 {
- reset(); // start from fresh screen.
+  reset(); // start from fresh screen.
   best_rssi = 0;
+  bestChannelName = 0;
+  bestChannelFrequency = 0;
   if (state == STATE_SCAN)
   {
     drawTitleBox(PSTR2("BAND SCANNER"));
@@ -445,7 +449,7 @@ void screens::updateBandScanMode(bool in_setup, uint8_t channel, uint8_t rssi, u
   uint8_t rssi_scaled = map(rssi, 1, 100, 1, 30);
   uint16_t hight = (display.height() - 12 - rssi_scaled);
   if (channel != last_channel) // only updated on changes
- {
+  {
 #ifdef USE_LBAND
     display.fillRect((channel * 5 / 2) + 4, display.height() - 12 - 30, 5 / 2, 30 - rssi_scaled, BLACK);
     display.fillRect((channel * 5 / 2) + 4, hight, 5 / 2, rssi_scaled, WHITE);
@@ -458,18 +462,36 @@ void screens::updateBandScanMode(bool in_setup, uint8_t channel, uint8_t rssi, u
     display.fillRect((channel * 3) + 4 + 3, display.height() - 12 - 30, 1, 30, BLACK);
 #endif
   }
-  if (!in_setup) {
-    if (rssi > RSSI_SEEK_TRESHOLD) {
-      if (best_rssi < rssi) {
-        best_rssi = rssi;
+  if (!in_setup)
+  {
+    // if scan started new sweep then show best channel from last sweep
+    //  and setup to look for new best-RSSI channel
+    if (channel < last_channel)
+    {
+      best_rssi = 0;
+      if (bestChannelName > 0)
+      {  //new best-RSSI channel was found
         display.setTextColor(WHITE, BLACK);
         display.setCursor(36, 12);
-        display.print((char)(channelName >> 8));      //band char
-        display.print((char)(channelName & 0xFF));    //channel char
+        display.print((char)(bestChannelName >> 8));    //band char
+        display.print((char)(bestChannelName & 0xFF));  //channel char
         display.setCursor(52, 12);
-        display.print(channelFrequency);
+        display.print(bestChannelFrequency);
+        bestChannelName = 0;
+        bestChannelFrequency = 0;
       }
-      else {
+    }
+
+    if (rssi > RSSI_SEEK_TRESHOLD)
+    {
+      if (rssi > best_rssi)
+      {
+        best_rssi = rssi;
+        bestChannelName = channelName;
+        bestChannelFrequency = channelFrequency;
+      }
+      else
+      {
         if (writePos + 10 > display.width() - 12)
         { // keep writing on the screen
           writePos = SCANNER_LIST_X_POS;
@@ -477,7 +499,8 @@ void screens::updateBandScanMode(bool in_setup, uint8_t channel, uint8_t rssi, u
       }
     }
   }
-  else {
+  else
+  {
     display.setCursor(30, 12);
     display.setTextColor(WHITE, BLACK);
     display.print( PSTR2("   ") );
