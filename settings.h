@@ -23,7 +23,7 @@ SOFTWARE.
 #ifndef settings_h
 #define settings_h
 
-#define PROG_REVISION_STR "RX5808 v0.50"
+#define PROG_REVISION_STR "RX5808 v1.00"
 
 // #define Debug
 
