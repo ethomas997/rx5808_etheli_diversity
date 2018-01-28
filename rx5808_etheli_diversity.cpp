@@ -472,20 +472,23 @@ void loop()
           break;                        //gc9n
 #ifdef USE_DIVERSITY
         case 6: // Diversity
-          if (isDiversity()) {
+          if (isDiversity())
             system_state = STATE_DIVERSITY;
-          }
-          else {
+          else
+          {  // Skip to next menu item
             menu_id++;
+            system_state = STATE_SCREEN_SAVER_LITE;
           }
           break;
 #else
-        case 6: // Skip
+        case 6: // Skip to next menu item
           menu_id++;
+          system_state = STATE_SCREEN_SAVER_LITE;
+          break;
 #endif
         case 7://Vres modelo            //gc9n
-           system_state = STATE_SCREEN_SAVER_LITE;       //gc9n
-           //drawScreen.updateScreenSaver(rssi);
+          system_state = STATE_SCREEN_SAVER_LITE;       //gc9n
+          //drawScreen.updateScreenSaver(rssi);
           break;
         case 8:// OSD enable/disable  //gc9n
           break;                        //gc9n
